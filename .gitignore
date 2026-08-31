@@ -1,0 +1,24 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# node (на будущее)
+node_modules/
+
+# os / ide
+.DS_Store
+.idea/
+.vscode/
+
+# записи экранов для отчётов — не тащим в репозиторий
+media/
+*.mov
+*.mp4
