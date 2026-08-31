@@ -22,3 +22,7 @@ node_modules/
 media/
 *.mov
 *.mp4
+
+# собранное macOS-приложение
+dist/
+*.app/

@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>День 1 — первый запрос к LLM</title>
+<style>
+  /* Палитра снята с системных цветов macOS: светлая и тёмная темы
+     переключаются сами вслед за настройкой системы. */
+  :root {
+    --chrome:    rgba(246,246,246,.72);
+    --canvas:    #ffffff;
+    --text:      #1d1d1f;
+    --muted:     #86868b;
+    --bubble:    #e9e9eb;
+    --field:     #ffffff;
+    --border:    rgba(0,0,0,.12);
+    --hairline:  rgba(0,0,0,.08);
+    --accent:    #007aff;
+    --code-bg:   rgba(0,0,0,.05);
+    --danger:    #d70015;
+    --danger-bg: rgba(215,0,21,.10);
+    --desktop:   linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:    0 22px 70px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --chrome:    rgba(58,58,60,.72);
+      --canvas:    #1e1e1e;
+      --text:      #f5f5f7;
+      --muted:     #98989d;
+      --bubble:    #3a3a3c;
+      --field:     #2c2c2e;
+      --border:    rgba(255,255,255,.14);
+      --hairline:  rgba(255,255,255,.10);
+      --accent:    #0a84ff;
+      --code-bg:   rgba(255,255,255,.07);
+      --danger:    #ff6961;
+      --danger-bg: rgba(255,105,97,.12);
+      --desktop:   linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+      --shadow:    0 22px 70px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.35);
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    display: grid;
+    place-items: center;
+    padding: 28px 20px;
+    background: var(--desktop);
+    background-attachment: fixed;
+    color: var(--text);
+    font: 14.5px/1.55 -apple-system, "SF Pro Text", BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── окно ───────────────────────────────────────────────────────── */
+  .window {
+    width: min(100%, 780px);
+    height: min(100%, 720px);
+    display: flex;
+    flex-direction: column;
+    background: var(--canvas);
+    border-radius: 12px;
+    box-shadow: var(--shadow), 0 0 0 .5px var(--border);
+    overflow: hidden;
+  }
+
+  .titlebar {
+    position: relative;
+    flex: none;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    background: var(--chrome);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    backdrop-filter: saturate(180%) blur(24px);
+    border-bottom: .5px solid var(--hairline);
+  }
+  .lights { display: flex; gap: 8px; }
+  .light {
+    width: 12px; height: 12px; border-radius: 50%;
+    box-shadow: inset 0 0 0 .5px rgba(0,0,0,.12);
+  }
+  .light.red    { background: #ff5f57; }
+  .light.yellow { background: #febc2e; }
+  .light.green  { background: #28c840; }
+
+  .titles {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%,-50%);
+    text-align: center; pointer-events: none;
+  }
+  .titles b { display: block; font-size: 13px; font-weight: 600; letter-spacing: -.01em; }
+  .titles span { display: block; font-size: 11px; color: var(--muted); }
+
+  .titlebar .reset {
+    margin-left: auto;
+    height: 24px; padding: 0 11px;
+    font: inherit; font-size: 12px;
+    color: var(--text);
+    background: var(--field);
+    border: .5px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .titlebar .reset:active:not(:disabled) { background: var(--bubble); }
+  .titlebar .reset:disabled { opacity: .4; cursor: default; }
+
+  /* ── лента сообщений ────────────────────────────────────────────── */
+  .transcript {
+    flex: 1; min-height: 0;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .transcript::-webkit-scrollbar { width: 9px; }
+  .transcript::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted) 45%, transparent);
+    border-radius: 5px; border: 3px solid transparent; background-clip: content-box;
+  }
+
+  .msg { display: flex; flex-direction: column; animation: pop .22s ease-out; }
+  .msg.me  { align-items: flex-end; }
+  .msg.bot { align-items: flex-start; }
+  @keyframes pop {
+    from { opacity: 0; transform: translateY(7px) scale(.985); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .bubble {
+    max-width: 80%;
+    padding: 9px 14px;
+    border-radius: 18px;
+    overflow-wrap: anywhere;
+  }
+  .me  .bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 5px; white-space: pre-wrap; }
+  .bot .bubble { background: var(--bubble); border-bottom-left-radius: 5px; }
+  .bot .bubble.error { background: var(--danger-bg); color: var(--danger); white-space: pre-wrap; }
+
+  .meta { margin: 5px 7px 0; font-size: 11px; color: var(--muted); }
+
+  /* markdown внутри ответа */
+  .bubble > :first-child { margin-top: 0; }
+  .bubble > :last-child  { margin-bottom: 0; }
+  .bubble p  { margin: .55em 0; }
+  .bubble h1, .bubble h2, .bubble h3 { margin: .8em 0 .4em; font-size: 1.03em; font-weight: 650; }
+  .bubble ul, .bubble ol { margin: .55em 0; padding-left: 1.35em; }
+  .bubble li { margin: .2em 0; }
+  .bubble a  { color: inherit; }
+  .bubble code {
+    font: 12.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    background: var(--code-bg); padding: .12em .35em; border-radius: 4px;
+  }
+  .bubble pre {
+    margin: .6em 0; padding: 10px 12px;
+    background: var(--code-bg); border-radius: 8px; overflow-x: auto;
+  }
+  .bubble pre code { background: none; padding: 0; }
+
+  /* каретка, пока текст печатается */
+  .streaming::after {
+    content: ''; display: inline-block; vertical-align: -2px;
+    width: 7px; height: 15px; margin-left: 2px;
+    background: currentColor; border-radius: 1px;
+    animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .dots { display: flex; gap: 4px; padding: 4px 1px; }
+  .dots i {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
+    animation: bounce 1.25s ease-in-out infinite;
+  }
+  .dots i:nth-child(2) { animation-delay: .16s; }
+  .dots i:nth-child(3) { animation-delay: .32s; }
+  @keyframes bounce {
+    0%, 60%, 100% { opacity: .3; transform: none; }
+    30%           { opacity: 1; transform: translateY(-3px); }
+  }
+
+  /* ── пустой экран ───────────────────────────────────────────────── */
+  .empty { margin: auto; text-align: center; max-width: 430px; }
+  .empty .glyph { font-size: 30px; opacity: .5; }
+  .empty h2 { margin: 10px 0 4px; font-size: 17px; font-weight: 600; }
+  .empty p  { margin: 0; color: var(--muted); font-size: 13px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; justify-content: center; margin-top: 18px; }
+  .chip {
+    font: inherit; font-size: 12.5px; color: var(--text);
+    background: var(--field); border: .5px solid var(--border);
+    border-radius: 14px; padding: 5px 12px; cursor: pointer;
+  }
+  .chip:hover { background: var(--bubble); }
+
+  /* ── поле ввода ─────────────────────────────────────────────────── */
+  .composer {
+    flex: none;
+    display: flex; align-items: flex-end; gap: 9px;
+    padding: 11px 13px;
+    background: var(--chrome);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    backdrop-filter: saturate(180%) blur(24px);
+    border-top: .5px solid var(--hairline);
+  }
+  .composer textarea {
+    flex: 1; resize: none;
+    max-height: 132px;
+    padding: 7px 13px;
+    font: inherit;
+    color: var(--text);
+    background: var(--field);
+    border: .5px solid var(--border);
+    border-radius: 17px;
+    outline: none;
+  }
+  .composer textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3.5px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  .send {
+    flex: none;
+    width: 30px; height: 30px; margin-bottom: 1px;
+    display: grid; place-items: center;
+    font-size: 15px; line-height: 1;
+    color: #fff; background: var(--accent);
+    border: 0; border-radius: 50%; cursor: pointer;
+  }
+  .send:disabled { background: var(--bubble); color: var(--muted); cursor: default; }
+
+  /* ── режим нативного окна (app.py) ──────────────────────────────
+     Рамку, тень и «светофор» рисует система, а не мы: убираем свою
+     имитацию окна и растягиваем содержимое на весь контент-вью. */
+  .native body {
+    display: block;
+    padding: 0;
+    background: var(--canvas);
+  }
+  .native .window {
+    width: 100%; height: 100%;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .native .titlebar { display: none; }
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights">
+      <span class="light red"></span><span class="light yellow"></span><span class="light green"></span>
+    </div>
+    <div class="titles">
+      <b>Первый запрос к LLM</b>
+      <span id="modelName">DeepSeek · REST API</span>
+    </div>
+    <button class="reset" id="reset" disabled>Новый диалог</button>
+  </header>
+
+  <div class="transcript" id="transcript">
+    <div class="empty" id="empty">
+      <div class="glyph">✦</div>
+      <h2>Спроси что-нибудь</h2>
+      <p>Запрос уходит в DeepSeek обычным POST-запросом и возвращается потоком — текст печатается по мере генерации.</p>
+      <div class="chips">
+        <button class="chip">Объясни, что такое REST API, в двух предложениях</button>
+        <button class="chip">Напиши хайку про первый день челленджа</button>
+        <button class="chip">Чем ты отличаешься от других моделей?</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="composer">
+    <textarea id="prompt" rows="1" placeholder="Сообщение…" autofocus></textarea>
+    <button class="send" id="send" disabled title="Отправить (Enter)">↑</button>
+  </footer>
+</div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const transcript = $('#transcript'), promptEl = $('#prompt'),
+      sendEl = $('#send'), resetEl = $('#reset');
+const emptyEl = $('#empty');
+
+let history = [];   // весь диалог: между запросами модель сама ничего не помнит
+let busy = false;
+
+// app.py открывает страницу как /?native=1 — там окно уже настоящее
+if (new URLSearchParams(location.search).has('native')) {
+  document.documentElement.classList.add('native');
+}
+
+/* ── крошечный markdown → html ───────────────────────────────────── */
+function renderMarkdown(src) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // во время стрима блок кода может быть ещё не закрыт — закрываем сами
+  if (((src.match(/```/g) || []).length) % 2) src += '\n```';
+
+  const blocks = [];
+  src = src.replace(/```[a-zA-Z0-9+#.-]*\n?([\s\S]*?)```/g, (_, body) => {
+    blocks.push('<pre><code>' + esc(body.replace(/\n+$/, '')) + '</code></pre>');
+    return '\n@@CODE' + (blocks.length - 1) + '@@\n';
+  });
+
+  const inline = (s) => esc(s)
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  const out = [];
+  let list = null;                                    // 'ul' | 'ol' | null
+  const closeList = () => { if (list) { out.push('</' + list + '>'); list = null; } };
+
+  for (const raw of src.split('\n')) {
+    const line = raw.trim();
+
+    const placeholder = line.match(/^@@CODE(\d+)@@$/);
+    if (placeholder) { closeList(); out.push(blocks[+placeholder[1]]); continue; }
+    if (!line)       { closeList(); continue; }
+
+    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      out.push('<h' + level + '>' + inline(heading[2]) + '</h' + level + '>');
+      continue;
+    }
+
+    const bullet = line.match(/^[-*•]\s+(.*)$/);
+    const numbered = line.match(/^\d+[.)]\s+(.*)$/);
+    if (bullet || numbered) {
+      const want = bullet ? 'ul' : 'ol';
+      if (list !== want) { closeList(); out.push('<' + want + '>'); list = want; }
+      out.push('<li>' + inline((bullet || numbered)[1]) + '</li>');
+      continue;
+    }
+
+    closeList();
+    out.push('<p>' + inline(line) + '</p>');
+  }
+  closeList();
+  return out.join('');
+}
+
+/* ── лента сообщений ─────────────────────────────────────────────── */
+function addMessage(who) {
+  emptyEl.remove();
+  const msg = document.createElement('div');
+  msg.className = 'msg ' + who;
+  msg.innerHTML = '<div class="bubble"></div>';
+  transcript.append(msg);
+  return msg.firstElementChild;
+}
+
+function scrollDown() {
+  transcript.scrollTo({ top: transcript.scrollHeight, behavior: 'smooth' });
+}
+
+function describe(msg) {
+  const bits = [];
+  if (msg.model) bits.push(msg.model);
+  if (msg.seconds != null) bits.push(msg.seconds + ' с');
+  if (msg.usage && msg.usage.total_tokens) bits.push(msg.usage.total_tokens + ' токенов');
+  return bits.join(' · ');
+}
+
+/* ── отправка ────────────────────────────────────────────────────── */
+async function send() {
+  const prompt = promptEl.value.trim();
+  if (!prompt || busy) return;
+
+  busy = true;
+  promptEl.value = '';
+  autoGrow();
+  syncControls();
+
+  addMessage('me').textContent = prompt;
+
+  const bubble = addMessage('bot');
+  bubble.innerHTML = '<div class="dots"><i></i><i></i><i></i></div>';
+  scrollDown();
+
+  let text = '';
+  try {
+    const res = await fetch('/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, history }),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    // сервер отдаёт по одному JSON на строку — разбираем их по мере поступления
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+
+        const msg = JSON.parse(line);
+        if (msg.error) throw new Error(msg.error);
+
+        if (msg.delta) {
+          text += msg.delta;
+          bubble.classList.add('streaming');
+          bubble.innerHTML = renderMarkdown(text);
+          scrollDown();
+        }
+        if (msg.done) {
+          const meta = describe(msg);
+          if (meta) {
+            const el = document.createElement('div');
+            el.className = 'meta';
+            el.textContent = meta;
+            bubble.parentElement.append(el);
+          }
+        }
+      }
+    }
+
+    bubble.classList.remove('streaming');
+    history.push({ role: 'user', content: prompt }, { role: 'assistant', content: text });
+  } catch (err) {
+    bubble.classList.remove('streaming');
+    bubble.classList.add('error');
+    bubble.textContent = String(err.message || err);
+  } finally {
+    busy = false;
+    syncControls();
+    scrollDown();
+    promptEl.focus();
+  }
+}
+
+/* ── мелочи интерфейса ───────────────────────────────────────────── */
+function syncControls() {
+  sendEl.disabled = busy || !promptEl.value.trim();
+  resetEl.disabled = busy || history.length === 0;
+}
+
+function autoGrow() {
+  promptEl.style.height = 'auto';
+  promptEl.style.height = promptEl.scrollHeight + 'px';
+}
+
+promptEl.addEventListener('input', () => { autoGrow(); syncControls(); });
+promptEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+sendEl.addEventListener('click', send);
+
+// в нативном окне то же самое дёргается из меню (Диалог → Новый, ⌘N)
+function resetConversation() {
+  history = [];
+  transcript.replaceChildren(emptyEl);
+  syncControls();
+  promptEl.focus();
+}
+window.resetConversation = resetConversation;
+resetEl.addEventListener('click', resetConversation);
+
+transcript.addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  promptEl.value = chip.textContent;
+  autoGrow();
+  send();
+});
+
+// показываем в подзаголовке ту модель, которая реально настроена в .env
+fetch('/model')
+  .then((r) => r.json())
+  .then((d) => { $('#modelName').textContent = d.model + ' · REST API'; })
+  .catch(() => {});
+</script>
+</body>
+</html>

@@ -1,112 +1,87 @@
 #!/usr/bin/env python3
-"""День 1: тот же запрос к LLM, но через простой веб-интерфейс.
+"""День 1: тот же запрос к LLM, но через окно в браузере.
 
-    python web.py            # http://127.0.0.1:8000
-    python web.py 9000       # другой порт
+    python3 web.py            # http://127.0.0.1:8000
+    python3 web.py 9000       # другой порт
 
-Веб-сервер на http.server из стандартной библиотеки — Flask сюда не нужен,
-задача ровно одна: поле ввода, кнопка, ответ модели.
+Сервер на http.server из стандартной библиотеки — Flask сюда не нужен.
+Всего три маршрута: страница, модель для подзаголовка и сам запрос к LLM.
+
+Ответ отдаётся потоком: по одному JSON на строку (NDJSON), браузер читает
+их по мере поступления и дорисовывает текст в пузырь.
 """
 
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
 
-from llm import LLMError, ask
+from llm import DEFAULT_MODEL, LLMError, ask_stream, load_env
 
-PAGE = """<!doctype html>
-<html lang="ru">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>День 1 — запрос к LLM</title>
-<style>
-  :root { color-scheme: dark; }
-  body { margin: 0; padding: 2rem 1rem; background: #14161a; color: #e8eaed;
-         font: 16px/1.6 system-ui, -apple-system, sans-serif; }
-  main { max-width: 720px; margin: 0 auto; }
-  h1 { font-size: 1.25rem; margin: 0 0 1.25rem; font-weight: 600; }
-  textarea { width: 100%; box-sizing: border-box; min-height: 110px; padding: .75rem;
-             border-radius: 10px; border: 1px solid #33373d; background: #1c1f24;
-             color: inherit; font: inherit; resize: vertical; }
-  button { margin-top: .75rem; padding: .6rem 1.4rem; border: 0; border-radius: 10px;
-           background: #4d7cfe; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  #answer { margin-top: 1.5rem; padding: 1rem; border-radius: 10px; background: #1c1f24;
-            border: 1px solid #33373d; white-space: pre-wrap; min-height: 3rem; }
-  #answer.error { border-color: #a33; color: #ff9b9b; }
-  .hint { color: #8b9099; font-size: .85rem; margin-top: .5rem; }
-</style>
-<main>
-  <h1>День 1 — первый запрос к LLM через API</h1>
-  <textarea id="prompt" placeholder="Спроси что-нибудь у модели..." autofocus></textarea>
-  <div><button id="send">Отправить</button></div>
-  <div class="hint">Ctrl/Cmd + Enter — тоже отправляет</div>
-  <div id="answer"></div>
-</main>
-<script>
-  const promptEl = document.getElementById('prompt');
-  const answerEl = document.getElementById('answer');
-  const sendEl = document.getElementById('send');
-
-  async function send() {
-    const prompt = promptEl.value.trim();
-    if (!prompt) return;
-    sendEl.disabled = true;
-    answerEl.className = '';
-    answerEl.textContent = 'Думаю...';
-    try {
-      const res = await fetch('/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
-      });
-      const data = await res.json();
-      answerEl.textContent = data.answer ?? data.error;
-      answerEl.className = data.error ? 'error' : '';
-    } catch (e) {
-      answerEl.textContent = 'Не удалось связаться с сервером: ' + e;
-      answerEl.className = 'error';
-    } finally {
-      sendEl.disabled = false;
-    }
-  }
-
-  sendEl.addEventListener('click', send);
-  promptEl.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') send();
-  });
-</script>
-</html>
-"""
+PAGE = Path(__file__).with_name("ui.html").read_bytes()
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path != "/":
-            self._send(404, b"not found", "text/plain; charset=utf-8")
-            return
-        self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+    server_version = "day01/1.0"
 
-    def do_POST(self):
-        if self.path != "/ask":
+    def do_GET(self) -> None:
+        # app.py открывает страницу как /?native=1 — query-строку отбрасываем
+        route = urlsplit(self.path).path
+
+        if route == "/":
+            self._send(200, PAGE, "text/html; charset=utf-8")
+        elif route == "/model":
+            try:
+                load_env()
+            except LLMError:
+                pass  # про недоступный .env расскажем при первом же запросе
+            model = os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL)
+            self._send_json(200, {"model": model})
+        else:
+            self._send(404, b"not found", "text/plain; charset=utf-8")
+
+    def do_POST(self) -> None:
+        if urlsplit(self.path).path != "/ask":
             self._send(404, b"not found", "text/plain; charset=utf-8")
             return
 
         length = int(self.headers.get("Content-Length") or 0)
         try:
-            prompt = json.loads(self.rfile.read(length) or b"{}").get("prompt", "").strip()
+            payload = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
             self._send_json(400, {"error": "Тело запроса — не JSON"})
             return
 
+        prompt = str(payload.get("prompt", "")).strip()
+        history = payload.get("history") or []
+
+        # Заголовки уходят сразу, тело дописывается по мере генерации,
+        # поэтому Content-Length здесь не выставляем.
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
         if not prompt:
-            self._send_json(400, {"error": "Пустой запрос"})
+            self._line({"error": "Пустой запрос"})
             return
 
+        stats: dict = {}
         try:
-            self._send_json(200, {"answer": ask(prompt)})
+            for delta in ask_stream(prompt, history=history, stats=stats):
+                self._line({"delta": delta})
+            self._line({"done": True, **stats})
         except LLMError as exc:
-            self._send_json(200, {"error": str(exc)})
+            self._line({"error": str(exc)})
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # вкладку закрыли посреди ответа — это нормально
+
+    def _line(self, payload: dict) -> None:
+        """Одна строка потока: компактный JSON + перевод строки."""
+        self.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n")
+        self.wfile.flush()
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
         self.send_response(status)
