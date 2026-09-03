@@ -30,6 +30,7 @@
 | 01 | Первый запрос к LLM через API | [days/day-01-first-api-call](days/day-01-first-api-call) | ✅ код готов, нужно видео |
 | 02 | Формат ответа | [days/day-02-response-format](days/day-02-response-format) | ✅ код готов, нужно видео |
 | 03 | Разные способы рассуждения | [days/day-03-reasoning-modes](days/day-03-reasoning-modes) | ✅ код готов, нужно видео |
+| 04 | Температура | [days/day-04-temperature](days/day-04-temperature) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 

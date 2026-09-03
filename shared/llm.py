@@ -21,6 +21,9 @@ DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 REQUEST_TIMEOUT = 120  # deepseek-reasoner думает долго
 ENV_FILE_VAR = "AI_ADVENT_ENV_FILE"
+RETRIES = 3               # попыток на запрос при сетевых сбоях
+RETRY_PAUSE = 2.0         # пауза между попытками, растёт линейно
+RETRIABLE_CODES = {429, 500, 502, 503, 504}
 
 
 class LLMError(Exception):
@@ -80,6 +83,7 @@ def ask(
     max_tokens: int | None = None,
     stop: list[str] | None = None,
     json_mode: bool = False,
+    temperature: float | None = None,
 ) -> Answer:
     """Один запрос к модели с полным набором рычагов управления ответом.
 
@@ -88,10 +92,13 @@ def ask(
     stop       — стоп-последовательности: как только модель их напишет,
                  генерация прекращается, а сама последовательность в ответ не попадает.
     json_mode  — режим строгого JSON на стороне API (response_format).
+    temperature — насколько модель отклоняется от самого вероятного варианта:
+                 0 — почти всегда одно и то же, выше — разнообразнее и рискованнее.
     """
     request, model_name = _build_request(
         prompt, system, model, history,
         stream=False, max_tokens=max_tokens, stop=stop, json_mode=json_mode,
+        temperature=temperature,
     )
     started = time.monotonic()
 
@@ -120,12 +127,14 @@ def ask_stream(
     max_tokens: int | None = None,
     stop: list[str] | None = None,
     json_mode: bool = False,
+    temperature: float | None = None,
     stats: dict | None = None,
 ) -> Iterator[str]:
     """То же самое, но с stream=True — текст отдаётся кусками по мере генерации."""
     request, model_name = _build_request(
         prompt, system, model, history,
         stream=True, max_tokens=max_tokens, stop=stop, json_mode=json_mode,
+        temperature=temperature,
     )
     started = time.monotonic()
 
@@ -169,6 +178,7 @@ def _build_request(
     max_tokens: int | None = None,
     stop: list[str] | None = None,
     json_mode: bool = False,
+    temperature: float | None = None,
 ) -> tuple[urllib.request.Request, str]:
     """Собирает POST-запрос к /chat/completions."""
     load_env()
@@ -197,6 +207,8 @@ def _build_request(
         body["stop"] = stop
     if json_mode:
         body["response_format"] = {"type": "json_object"}
+    if temperature is not None:
+        body["temperature"] = temperature
     if stream:
         body["stream_options"] = {"include_usage": True}
 
@@ -213,13 +225,32 @@ def _build_request(
 
 
 def _open(request: urllib.request.Request):
-    """urlopen с человеческими сообщениями вместо трейсбеков."""
-    try:
-        return urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT)
-    except urllib.error.HTTPError as exc:
-        raise LLMError(_explain_http_error(exc)) from exc
-    except urllib.error.URLError as exc:
-        raise LLMError(f"Сеть недоступна или API не отвечает: {exc.reason}") from exc
+    """urlopen с человеческими сообщениями вместо трейсбеков.
+
+    Сетевые сбои и «сервер занят» повторяем: на длинных прогонах в несколько
+    десятков запросов один случайный обрыв иначе роняет весь эксперимент.
+    Ошибки, которые повтор не исправит (неверный ключ, пустой баланс), —
+    сразу наружу.
+    """
+    last: Exception | None = None
+
+    for attempt in range(RETRIES):
+        try:
+            return urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRIABLE_CODES:
+                raise LLMError(_explain_http_error(exc)) from exc
+            last = exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last = exc
+
+        if attempt < RETRIES - 1:
+            time.sleep(RETRY_PAUSE * (attempt + 1))
+
+    if isinstance(last, urllib.error.HTTPError):
+        raise LLMError(_explain_http_error(last)) from last
+    reason = getattr(last, "reason", last)
+    raise LLMError(f"Сеть недоступна или API не отвечает: {reason}") from last
 
 
 def _explain_http_error(exc: urllib.error.HTTPError) -> str:
