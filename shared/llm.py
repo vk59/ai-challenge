@@ -1,8 +1,11 @@
-"""Клиент к DeepSeek API поверх стандартной библиотеки.
+"""Клиент к LLM-API поверх стандартной библиотеки.
 
 Вырос из days/day-01-first-api-call/llm.py: там задача была показать голый запрос,
 здесь добавились рычаги управления ответом, которые нужны со дня 2 —
-формат, длина и условие остановки.
+формат, длина и условие остановки, а со дня 5 — выбор провайдера.
+
+Провайдеры разговаривают одним и тем же диалектом (формат OpenAI),
+поэтому переключение — это смена базового URL и переменной с ключом.
 
 День 1 сознательно оставлен со своей копией: это уже сданный самодостаточный
 артефакт, и его код показан на видео как есть.
@@ -30,6 +33,26 @@ class LLMError(Exception):
     """Понятная человеку ошибка обращения к API."""
 
 
+@dataclass(frozen=True)
+class Provider:
+    """Куда стучимся и каким ключом. Диалект у всех одинаковый — OpenAI-совместимый."""
+
+    name: str
+    base_url: str
+    key_var: str
+    console: str            # где взять ключ, подставляется в текст ошибки
+
+
+DEEPSEEK = Provider(
+    "DeepSeek", DEFAULT_BASE_URL, "DEEPSEEK_API_KEY",
+    "https://platform.deepseek.com/api_keys",
+)
+OPENROUTER = Provider(
+    "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
+    "https://openrouter.ai/keys",
+)
+
+
 @dataclass
 class Answer:
     """Ответ модели вместе со всем, что о нём рассказал API."""
@@ -43,6 +66,10 @@ class Answer:
     @property
     def completion_tokens(self) -> int:
         return self.usage.get("completion_tokens", 0)
+
+    @property
+    def prompt_tokens(self) -> int:
+        return self.usage.get("prompt_tokens", 0)
 
     @property
     def words(self) -> int:
@@ -84,6 +111,7 @@ def ask(
     stop: list[str] | None = None,
     json_mode: bool = False,
     temperature: float | None = None,
+    provider: Provider | None = None,
 ) -> Answer:
     """Один запрос к модели с полным набором рычагов управления ответом.
 
@@ -98,7 +126,7 @@ def ask(
     request, model_name = _build_request(
         prompt, system, model, history,
         stream=False, max_tokens=max_tokens, stop=stop, json_mode=json_mode,
-        temperature=temperature,
+        temperature=temperature, provider=provider,
     )
     started = time.monotonic()
 
@@ -128,13 +156,14 @@ def ask_stream(
     stop: list[str] | None = None,
     json_mode: bool = False,
     temperature: float | None = None,
+    provider: Provider | None = None,
     stats: dict | None = None,
 ) -> Iterator[str]:
     """То же самое, но с stream=True — текст отдаётся кусками по мере генерации."""
     request, model_name = _build_request(
         prompt, system, model, history,
         stream=True, max_tokens=max_tokens, stop=stop, json_mode=json_mode,
-        temperature=temperature,
+        temperature=temperature, provider=provider,
     )
     started = time.monotonic()
 
@@ -179,19 +208,24 @@ def _build_request(
     stop: list[str] | None = None,
     json_mode: bool = False,
     temperature: float | None = None,
+    provider: Provider | None = None,
 ) -> tuple[urllib.request.Request, str]:
     """Собирает POST-запрос к /chat/completions."""
     load_env()
+    provider = provider or DEEPSEEK
 
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    api_key = os.environ.get(provider.key_var, "").strip()
     if not api_key:
         raise LLMError(
-            "Не найден DEEPSEEK_API_KEY.\n"
-            "Впиши ключ в файл .env в корне репозитория "
-            "(взять тут: https://platform.deepseek.com/api_keys)"
+            f"Не найден {provider.key_var}.\n"
+            f"Впиши ключ в файл .env в корне репозитория "
+            f"(взять тут: {provider.console})"
         )
 
-    base_url = os.environ.get("DEEPSEEK_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    base_url = provider.base_url
+    if provider is DEEPSEEK:
+        base_url = os.environ.get("DEEPSEEK_BASE_URL", base_url)
+    base_url = base_url.rstrip("/")
     model = model or os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL)
 
     messages = []

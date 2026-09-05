@@ -31,14 +31,16 @@
 | 02 | Формат ответа | [days/day-02-response-format](days/day-02-response-format) | ✅ код готов, нужно видео |
 | 03 | Разные способы рассуждения | [days/day-03-reasoning-modes](days/day-03-reasoning-modes) | ✅ код готов, нужно видео |
 | 04 | Температура | [days/day-04-temperature](days/day-04-temperature) | ✅ код готов, нужно видео |
+| 05 | Версии моделей | [days/day-05-model-tiers](days/day-05-model-tiers) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 
 Внешних зависимостей пока нет — нужен только Python 3.10+.
-Остаётся вписать ключ DeepSeek в `.env` (файл уже создан, в git не попадает):
+Остаётся вписать ключи в `.env` (файл уже создан, в git не попадает):
 
 ```
-DEEPSEEK_API_KEY=sk-...
+DEEPSEEK_API_KEY=sk-...          # дни 1–5
+OPENROUTER_API_KEY=sk-or-v1-...  # нужен со дня 5
 ```
 
 Запуск дня:
