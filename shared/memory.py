@@ -169,6 +169,29 @@ class Summary:
         )
 
 
+@dataclass
+class Fact:
+    """Один факт из диалога — ключ и значение (день 10).
+
+    Отдельная сущность, а не строка в пересказе: факты перезаписываются
+    по ключу. Сказали «бюджет 800 тысяч», потом «бюджет подняли до миллиона» —
+    в памяти должно остаться второе, а не оба подряд. Пересказ дня 9 так
+    не умеет: он только прирастает.
+    """
+
+    key: str
+    value: str
+    at: str = ""
+
+    def as_dict(self) -> dict:
+        return {"key": self.key, "value": self.value, "at": self.at}
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Fact":
+        return cls(key=str(raw.get("key", "")), value=str(raw.get("value", "")),
+                   at=str(raw.get("at", "")))
+
+
 class Store:
     """Общий интерфейс хранилища. Агент знает только его, не реализацию."""
 
@@ -203,6 +226,39 @@ class Store:
     def load_summary(self, session: str) -> Summary | None:
         """Достать пересказ; None — если сессию ещё ни разу не сжимали."""
         raise NotImplementedError
+
+    # ── факты и ветки (день 10) ─────────────────────────────────────────
+    def save_facts(self, session: str, facts: list[Fact]) -> None:
+        """Переписать набор фактов целиком: они живут как единая карточка."""
+        raise NotImplementedError
+
+    def load_facts(self, session: str) -> list[Fact]:
+        """Факты сессии; пустой список — если их ещё не извлекали."""
+        raise NotImplementedError
+
+    def fork(self, session: str, branch: str, upto: int) -> int:
+        """Ответвить новый диалог от первых upto реплик исходного.
+
+        Реплики копируются, а не связываются ссылкой на родителя. Ссылка
+        экономнее, но тогда каждая загрузка ветки означала бы рекурсивный
+        обход предков, а удаление родителя ломало бы потомков. Копия —
+        это чуть больше байт на диске и полная независимость веток,
+        что здесь и требуется: ветки должны расходиться и жить сами.
+
+        Возвращает, сколько реплик скопировано.
+        """
+        источник = self.load(session)[:upto]
+        for turn in источник:
+            self.append(branch, turn)
+        # Факты и пересказ наследуются: ветка начинается с того же состояния
+        # памяти, иначе развилка была бы нечестной.
+        факты = self.load_facts(session)
+        if факты:
+            self.save_facts(branch, факты)
+        пересказ = self.load_summary(session)
+        if пересказ:
+            self.save_summary(branch, пересказ)
+        return len(источник)
 
     # ── общее для реализаций ────────────────────────────────────────────
     @staticmethod
@@ -306,6 +362,15 @@ class JsonStore(Store):
         raw = self._read(session).get("summary")
         return Summary.from_dict(raw) if raw else None
 
+    def save_facts(self, session: str, facts: list[Fact]) -> None:
+        with self._lock:
+            data = self._read(session)
+            data["facts"] = [f.as_dict() for f in facts]
+            self._write(session, data)
+
+    def load_facts(self, session: str) -> list[Fact]:
+        return [Fact.from_dict(r) for r in self._read(session).get("facts") or []]
+
     # ── внутреннее ──────────────────────────────────────────────────────
     def _path(self, session: str) -> Path:
         return self.dir / f"{_safe_name(session)}.json"
@@ -376,6 +441,17 @@ class SqliteStore(Store):
         covered  INTEGER NOT NULL DEFAULT 0,
         tokens   INTEGER NOT NULL DEFAULT 0,
         rounds   INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- Факты «ключ-значение» (день 10). Ключ уникален в пределах сессии:
+    -- новое значение вытесняет старое, в этом весь смысл — память должна
+    -- обновляться, а не прирастать.
+    CREATE TABLE IF NOT EXISTS facts (
+        session  TEXT    NOT NULL,
+        key      TEXT    NOT NULL,
+        value    TEXT    NOT NULL,
+        at       TEXT    NOT NULL DEFAULT '',
+        PRIMARY KEY (session, key)
     );
     """
 
@@ -452,6 +528,7 @@ class SqliteStore(Store):
             # Пересказ тоже: иначе «забыть» оставило бы на диске выжимку
             # из стёртого диалога, и она всплыла бы при следующем запуске.
             db.execute("DELETE FROM summaries WHERE session = ?", (session,))
+            db.execute("DELETE FROM facts WHERE session = ?", (session,))
 
     def save_summary(self, session: str, summary: Summary) -> None:
         with self._connect() as db:
@@ -474,6 +551,24 @@ class SqliteStore(Store):
                 (session,),
             ).fetchone()
         return Summary(*row) if row else None
+
+    def save_facts(self, session: str, facts: list[Fact]) -> None:
+        with self._connect() as db:
+            # Карточка фактов переписывается целиком: так исчезнувший из
+            # диалога факт не остаётся висеть на диске навсегда.
+            db.execute("DELETE FROM facts WHERE session = ?", (session,))
+            db.executemany(
+                "INSERT INTO facts (session, key, value, at) VALUES (?, ?, ?, ?)",
+                [(session, f.key, f.value, f.at) for f in facts],
+            )
+
+    def load_facts(self, session: str) -> list[Fact]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT key, value, at FROM facts WHERE session = ? ORDER BY key",
+                (session,),
+            ).fetchall()
+        return [Fact(*row) for row in rows]
 
     # ── внутреннее ──────────────────────────────────────────────────────
     @contextmanager
@@ -518,5 +613,5 @@ def _safe_name(session: str) -> str:
 
 
 __all__ = ["Store", "JsonStore", "SqliteStore", "Turn", "SessionInfo", "Totals",
-           "Summary", "open_store", "default_dir", "now_iso", "local_time",
+           "Summary", "Fact", "open_store", "default_dir", "now_iso", "local_time",
            "DEFAULT_SESSION", "ENV_DIR_VAR", "MemoryError_"]

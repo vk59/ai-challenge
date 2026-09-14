@@ -38,6 +38,7 @@
 | 07 | Сохранение контекста | [days/day-07-memory](days/day-07-memory) | ✅ код готов, нужно видео |
 | 08 | Работа с токенами | [days/day-08-tokens](days/day-08-tokens) | ✅ код готов, нужно видео |
 | 09 | Сжатие истории | [days/day-09-compression](days/day-09-compression) | ✅ код готов, нужно видео |
+| 10 | Стратегии контекста | [days/day-10-strategies](days/day-10-strategies) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 

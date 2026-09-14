@@ -23,9 +23,34 @@ import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
+import json as _json
+
 from llm import LLMError, Provider, ask, ask_stream
-from memory import DEFAULT_SESSION, Store, Summary, Turn, now_iso
+from memory import DEFAULT_SESSION, Fact, Store, Summary, Turn, now_iso
 from tokens import cost, estimate_request, limit_of, money
+
+# Стратегии управления контекстом (день 10).
+STRATEGIES = ("window", "facts", "branch")
+
+# Промпт извлечения фактов. Просим вернуть карточку ЦЕЛИКОМ, а не дельту:
+# модель сама решает, что обновить, что добавить, а что выбросить. Дельту
+# пришлось бы сливать руками, и на конфликтах («бюджет 800» против
+# «бюджет подняли до миллиона») это ломалось бы молча.
+FACTS_ROLE = (
+    "Ты ведёшь карточку фактов о проекте по ходу диалога. "
+    "Верни JSON — плоский объект «ключ: значение», значения только строки. "
+    "Держи в нём то, что понадобится дальше: цель, ограничения, бюджет, сроки, "
+    "принятые решения, предпочтения и договорённости. "
+    "Если факт изменился — замени значение, не плоди дубли. "
+    "Если факт отменён — убери ключ. Ничего не выдумывай: только то, "
+    "что прямо сказано в диалоге. Ключи короткие, по-русски."
+)
+
+# У deepseek-v4-flash есть скрытое поле reasoning_content: модель думает
+# перед ответом, и это думание тратит бюджет max_tokens. При тесном лимите
+# всё уходит в размышление, а content приходит ПУСТЫМ с finish=length.
+# Отсюда запас: полторы тысячи там, где видимого текста на две сотни.
+FACTS_MAX_TOKENS = 1500
 
 # Промпт сжатия. Требования к нему жёсткие и неочевидные: пересказ должен
 # сохранять то, о чём агента потом спросят, — имена, числа, договорённости,
@@ -71,18 +96,33 @@ class Stats:
     compression_prompt_tokens: int = 0
     compression_completion_tokens: int = 0
 
+    # День 10: извлечение фактов — тоже отдельный запрос на каждую реплику,
+    # и тоже за деньги. Считается своей строкой по той же причине.
+    extractions: int = 0
+    extraction_prompt_tokens: int = 0
+    extraction_completion_tokens: int = 0
+
     @property
     def compression_tokens(self) -> int:
         return self.compression_prompt_tokens + self.compression_completion_tokens
 
     @property
+    def extraction_tokens(self) -> int:
+        return self.extraction_prompt_tokens + self.extraction_completion_tokens
+
+    @property
+    def overhead_tokens(self) -> int:
+        """Всё, что потрачено НЕ на сам диалог: свёртки и извлечение фактов."""
+        return self.compression_tokens + self.extraction_tokens
+
+    @property
     def dialogue_tokens(self) -> int:
-        """Только сам диалог, без накладных расходов на сжатие."""
+        """Только сам диалог, без служебных запросов."""
         return self.prompt_tokens + self.completion_tokens
 
     @property
     def total_tokens(self) -> int:
-        return self.dialogue_tokens + self.compression_tokens
+        return self.dialogue_tokens + self.overhead_tokens
 
     @property
     def average_prompt(self) -> float:
@@ -138,6 +178,7 @@ class Agent:
         compress: bool = False,
         keep_last: int = 3,
         summarize_every: int = 5,
+        strategy: str = "window",
     ) -> None:
         self.name = name
         self.role = role
@@ -158,6 +199,15 @@ class Agent:
         self.keep_last = keep_last
         self.summarize_every = summarize_every
         self.summary: Summary | None = None
+
+        # День 10. Стратегия решает, ЧТО именно уезжает в модель вместо
+        # выброшенной истории: ничего (window), карточка фактов (facts)
+        # или — при ветвлении — история той ветки, в которой мы сейчас.
+        if strategy not in STRATEGIES:
+            raise ValueError(f"Неизвестная стратегия: {strategy!r}. "
+                             f"Ожидалось одно из {STRATEGIES}")
+        self.strategy = strategy
+        self.facts: list[Fact] = []
 
         self._history: list[dict] = []
         self.stats = Stats()
@@ -233,6 +283,7 @@ class Agent:
         self.journal.clear()
         self.stats = Stats()
         self.summary = None
+        self.facts = []
         if self.store:
             self.store.clear(self.session)
 
@@ -258,16 +309,18 @@ class Agent:
         # с ней — но ВМЕСТО свёрнутых реплик, которых здесь уже нет.
         summary = (estimate_text(self.summary.content)
                    if self.summary and self.summary.content else 0)
+        facts = sum(estimate_text(f"- {f.key}: {f.value}") for f in self.facts)
         history = sum(estimate_text(item.get("content", "")) + MESSAGE_OVERHEAD
                       for item in self._history)
         question = estimate_text(message)
-        total = REQUEST_OVERHEAD + role + summary + history + question
+        total = REQUEST_OVERHEAD + role + summary + facts + history + question
 
         limit = limit_of(self.model)
         return {
             "overhead": REQUEST_OVERHEAD,
             "role": role,
             "summary": summary,
+            "facts": facts,
             "history": history,
             "question": question,
             "total": total,
@@ -355,10 +408,85 @@ class Agent:
         бы считать его частью разговора. Место ему рядом с ролью — это
         справка о том, что было раньше.
         """
-        if not self.summary or not self.summary.content:
-            return self.role
-        return (f"{self.role}\n\n"
-                f"[Ранее в этом диалоге, сжатый пересказ]\n{self.summary.content}")
+        куски = [self.role]
+        if self.summary and self.summary.content:
+            куски.append("[Ранее в этом диалоге, сжатый пересказ]\n"
+                         + self.summary.content)
+        if self.facts:
+            # Факты идут туда же, куда пересказ, и по той же причине: это
+            # справка о диалоге, а не реплика в нём.
+            карточка = "\n".join(f"- {f.key}: {f.value}" for f in self.facts)
+            куски.append(f"[Известные факты по проекту]\n{карточка}")
+        return "\n\n".join(куски)
+
+    # ── факты, стратегия «Sticky Facts» (день 10) ───────────────────────
+    def _extract_facts(self, question: str, answer: str) -> None:
+        """Обновляет карточку фактов после реплики пользователя.
+
+        Отдельный запрос к модели на каждую реплику — да, это дорого, и
+        в статистике оно лежит отдельной строкой. Зато карточка обновляется
+        по ключу: «бюджет 800 тысяч» сменяется на «бюджет миллион», а не
+        соседствует с ним, как было бы в пересказе дня 9.
+        """
+        текущие = ("\n".join(f"{f.key}: {f.value}" for f in self.facts)
+                   or "(пока пусто)")
+        запрос = (f"Текущая карточка фактов:\n{текущие}\n\n"
+                  f"Новая реплика пользователя:\n{question}\n\n"
+                  f"Ответ ассистента:\n{answer}\n\n"
+                  f"Верни обновлённую карточку целиком, в JSON.")
+
+        answer_obj = ask(
+            запрос,
+            system=FACTS_ROLE,
+            model=self.model,
+            json_mode=True,
+            temperature=0.1,      # карточка фактов должна быть скучной
+            max_tokens=FACTS_MAX_TOKENS,
+            provider=self.provider,
+        )
+
+        self.stats.extractions += 1
+        self.stats.extraction_prompt_tokens += answer_obj.prompt_tokens
+        self.stats.extraction_completion_tokens += answer_obj.completion_tokens
+
+        сырой = (answer_obj.text or "").strip()
+        if not сырой:
+            # Пустой content при finish=length — размышление съело бюджет.
+            # Это не повод терять уже набранные факты: оставляем как было.
+            return
+        try:
+            разобрано = _json.loads(сырой)
+        except _json.JSONDecodeError:
+            return
+        if not isinstance(разобрано, dict):
+            return
+
+        сейчас = now_iso()
+        self.facts = [Fact(str(k), str(v), сейчас) for k, v in разобрано.items()
+                      if str(v).strip()]
+        if self.store:
+            self.store.save_facts(self.session, self.facts)
+
+    # ── ветвление, стратегия «Branching» (день 10) ──────────────────────
+    def checkpoint(self) -> int:
+        """Текущая точка диалога — номер реплики, от которой можно ветвиться."""
+        return len(self.transcript())
+
+    def fork(self, branch: str, upto: int | None = None) -> int:
+        """Создать ветку от точки upto (по умолчанию — от текущего места).
+
+        Ветка получает копию истории до точки развилки и наследует факты
+        с пересказом. Дальше живёт сама: дописывание в одну ветку не видно
+        в другой. Сам агент при этом НЕ переключается — для этого switch().
+        """
+        if not self.store:
+            raise LLMError("Ветвление требует хранилища: агент создан без store")
+        точка = self.checkpoint() if upto is None else upto
+        return self.store.fork(self.session, branch, точка)
+
+    def branches(self) -> list[str]:
+        """Все сохранённые диалоги — ветки среди них живут на равных."""
+        return [s.name for s in self.store.sessions()] if self.store else []
 
     def _compress(self, doomed: list[dict]) -> None:
         """Сворачивает пачку вытесненных пар в пересказ.
@@ -419,12 +547,14 @@ class Agent:
         self.journal.clear()
         self.stats = Stats()
         self.summary = None
+        self.facts = []
         if not self.store:
             return
 
-        # Пересказ поднимаем первым: без него агент после перезапуска
+        # Пересказ и факты поднимаем первыми: без них агент после перезапуска
         # оказался бы с обрывком окна и без всего, что было свёрнуто.
         self.summary = self.store.load_summary(self.session)
+        self.facts = self.store.load_facts(self.session)
 
         # В режиме сжатия размер окна задаётся не memory_turns, а парой
         # keep_last + summarize_every — иначе после перезапуска окно
@@ -466,6 +596,15 @@ class Agent:
                               Turn("user", question, at, prompt_tokens, 0.0))
             self.store.append(self.session,
                               Turn("assistant", answer, at, completion_tokens, seconds))
+
+        # Карточка фактов обновляется после каждой реплики — как требует
+        # задание. Сбой извлечения не должен ронять диалог: факты останутся
+        # прежними, разговор продолжится.
+        if self.strategy == "facts":
+            try:
+                self._extract_facts(question, answer)
+            except LLMError:
+                pass
 
     def _trim(self) -> None:
         """Держит окно в рамках. Как именно — зависит от режима.
