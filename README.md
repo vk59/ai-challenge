@@ -37,6 +37,7 @@
 | 06 | Первый агент | [days/day-06-first-agent](days/day-06-first-agent) | ✅ код готов, нужно видео |
 | 07 | Сохранение контекста | [days/day-07-memory](days/day-07-memory) | ✅ код готов, нужно видео |
 | 08 | Работа с токенами | [days/day-08-tokens](days/day-08-tokens) | ✅ код готов, нужно видео |
+| 09 | Сжатие истории | [days/day-09-compression](days/day-09-compression) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 

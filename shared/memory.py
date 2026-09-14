@@ -138,6 +138,37 @@ class Totals:
     seconds: float = 0.0
 
 
+@dataclass
+class Summary:
+    """Сжатый пересказ вытесненной части диалога (день 9).
+
+    Лежит отдельно от реплик и подставляется в запрос ВМЕСТО них. Хранить
+    его обязательно на диске: иначе перезапуск вернёт агента к обрывку
+    окна, а всё, что было свёрнуто, пропадёт — то есть сжатие окажется
+    способом терять память, а не экономить токены.
+    """
+
+    content: str
+    at: str = ""
+    covered: int = 0         # сколько пар реплик свёрнуто в этот текст
+    tokens: int = 0          # во сколько токенов обошлось само сжатие
+    rounds: int = 0          # сколько раз пересобирался (сжатие накопительное)
+
+    def as_dict(self) -> dict:
+        return {"content": self.content, "at": self.at, "covered": self.covered,
+                "tokens": self.tokens, "rounds": self.rounds}
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Summary":
+        return cls(
+            content=str(raw.get("content", "")),
+            at=str(raw.get("at", "")),
+            covered=int(raw.get("covered", 0) or 0),
+            tokens=int(raw.get("tokens", 0) or 0),
+            rounds=int(raw.get("rounds", 0) or 0),
+        )
+
+
 class Store:
     """Общий интерфейс хранилища. Агент знает только его, не реализацию."""
 
@@ -162,6 +193,15 @@ class Store:
 
     def clear(self, session: str) -> None:
         """Стереть сессию. Забыть — значит забыть и на диске тоже."""
+        raise NotImplementedError
+
+    # ── сжатая история (день 9) ─────────────────────────────────────────
+    def save_summary(self, session: str, summary: Summary) -> None:
+        """Сохранить пересказ. Один на сессию: он накопительный, не список."""
+        raise NotImplementedError
+
+    def load_summary(self, session: str) -> Summary | None:
+        """Достать пересказ; None — если сессию ещё ни разу не сжимали."""
         raise NotImplementedError
 
     # ── общее для реализаций ────────────────────────────────────────────
@@ -256,6 +296,16 @@ class JsonStore(Store):
         with self._lock:
             self._path(session).unlink(missing_ok=True)
 
+    def save_summary(self, session: str, summary: Summary) -> None:
+        with self._lock:
+            data = self._read(session)
+            data["summary"] = summary.as_dict()
+            self._write(session, data)
+
+    def load_summary(self, session: str) -> Summary | None:
+        raw = self._read(session).get("summary")
+        return Summary.from_dict(raw) if raw else None
+
     # ── внутреннее ──────────────────────────────────────────────────────
     def _path(self, session: str) -> Path:
         return self.dir / f"{_safe_name(session)}.json"
@@ -314,6 +364,19 @@ class SqliteStore(Store):
         seconds  REAL    NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS turns_by_session ON turns (session, id);
+
+    -- Сжатая история (день 9). Отдельная таблица, а не строка в turns:
+    -- пересказ не является репликой диалога и в модель уезжает иначе —
+    -- рядом с ролью, а не в списке сообщений.
+    -- IF NOT EXISTS делает миграцию баз дней 7-8 бесплатной.
+    CREATE TABLE IF NOT EXISTS summaries (
+        session  TEXT    PRIMARY KEY,
+        content  TEXT    NOT NULL,
+        at       TEXT    NOT NULL DEFAULT '',
+        covered  INTEGER NOT NULL DEFAULT 0,
+        tokens   INTEGER NOT NULL DEFAULT 0,
+        rounds   INTEGER NOT NULL DEFAULT 0
+    );
     """
 
     def __init__(self, path: Path | str | None = None) -> None:
@@ -386,6 +449,31 @@ class SqliteStore(Store):
     def clear(self, session: str) -> None:
         with self._connect() as db:
             db.execute("DELETE FROM turns WHERE session = ?", (session,))
+            # Пересказ тоже: иначе «забыть» оставило бы на диске выжимку
+            # из стёртого диалога, и она всплыла бы при следующем запуске.
+            db.execute("DELETE FROM summaries WHERE session = ?", (session,))
+
+    def save_summary(self, session: str, summary: Summary) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO summaries (session, content, at, covered, tokens, rounds)"
+                " VALUES (?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(session) DO UPDATE SET"
+                "   content = excluded.content, at = excluded.at,"
+                "   covered = excluded.covered, tokens = excluded.tokens,"
+                "   rounds = excluded.rounds",
+                (session, summary.content, summary.at, summary.covered,
+                 summary.tokens, summary.rounds),
+            )
+
+    def load_summary(self, session: str) -> Summary | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT content, at, covered, tokens, rounds FROM summaries"
+                " WHERE session = ?",
+                (session,),
+            ).fetchone()
+        return Summary(*row) if row else None
 
     # ── внутреннее ──────────────────────────────────────────────────────
     @contextmanager
@@ -430,5 +518,5 @@ def _safe_name(session: str) -> str:
 
 
 __all__ = ["Store", "JsonStore", "SqliteStore", "Turn", "SessionInfo", "Totals",
-           "open_store", "default_dir", "now_iso", "local_time", "DEFAULT_SESSION",
-           "ENV_DIR_VAR", "MemoryError_"]
+           "Summary", "open_store", "default_dir", "now_iso", "local_time",
+           "DEFAULT_SESSION", "ENV_DIR_VAR", "MemoryError_"]

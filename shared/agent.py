@@ -24,8 +24,21 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from llm import LLMError, Provider, ask, ask_stream
-from memory import DEFAULT_SESSION, Store, Turn, now_iso
+from memory import DEFAULT_SESSION, Store, Summary, Turn, now_iso
 from tokens import cost, estimate_request, limit_of, money
+
+# Промпт сжатия. Требования к нему жёсткие и неочевидные: пересказ должен
+# сохранять то, о чём агента потом спросят, — имена, числа, договорённости,
+# решения. Красивый связный текст, из которого вынуты факты, здесь хуже
+# сухого списка: диалог продолжится, и по этому тексту придётся отвечать.
+COMPRESS_ROLE = (
+    "Ты сжимаешь историю диалога, чтобы она заняла меньше места, но осталась "
+    "пригодной для продолжения разговора. Сохрани обязательно: имена, названия, "
+    "числа, даты, принятые решения, задачи и предпочтения собеседника. "
+    "Выброси приветствия, вежливость, рассуждения и повторы. "
+    "Пиши сухими короткими пунктами от третьего лица, без вступления и выводов. "
+    "Если в старом пересказе уже есть факты — перенеси их в новый, не потеряв."
+)
 
 # Явно, а не через DEFAULT_MODEL из llm: там стоит алиас deepseek-chat,
 # который на самом деле routes на v4-flash (выяснилось в дне 5). Агент
@@ -48,9 +61,28 @@ class Stats:
     completion_tokens: int = 0
     seconds: float = 0.0
 
+    # День 9: сжатие не бесплатно. Каждая свёртка — отдельный запрос
+    # к модели, и считать его надо отдельно, иначе «экономия» окажется
+    # бухгалтерией, в которой спрятаны расходы.
+    #
+    # Вход и выход раздельно не для красоты: они стоят разных денег
+    # (у flash выход вдвое дороже), и одним числом цену не посчитать.
+    compressions: int = 0
+    compression_prompt_tokens: int = 0
+    compression_completion_tokens: int = 0
+
+    @property
+    def compression_tokens(self) -> int:
+        return self.compression_prompt_tokens + self.compression_completion_tokens
+
+    @property
+    def dialogue_tokens(self) -> int:
+        """Только сам диалог, без накладных расходов на сжатие."""
+        return self.prompt_tokens + self.completion_tokens
+
     @property
     def total_tokens(self) -> int:
-        return self.prompt_tokens + self.completion_tokens
+        return self.dialogue_tokens + self.compression_tokens
 
     @property
     def average_prompt(self) -> float:
@@ -103,6 +135,9 @@ class Agent:
         provider: Provider | None = None,
         store: Store | None = None,
         session: str = DEFAULT_SESSION,
+        compress: bool = False,
+        keep_last: int = 3,
+        summarize_every: int = 5,
     ) -> None:
         self.name = name
         self.role = role
@@ -113,6 +148,16 @@ class Agent:
         self.provider = provider
         self.store = store
         self.session = session
+
+        # День 9: вместо того чтобы выбрасывать вытесненные пары, сворачиваем
+        # их в пересказ. keep_last пар всегда живут «как есть», а как только
+        # сверх них накопится summarize_every — эта пачка уходит на сжатие.
+        # Пачкой, а не по одной: иначе на каждую реплику приходился бы лишний
+        # запрос к модели, и лечение вышло бы дороже болезни.
+        self.compress = compress
+        self.keep_last = keep_last
+        self.summarize_every = summarize_every
+        self.summary: Summary | None = None
 
         self._history: list[dict] = []
         self.stats = Stats()
@@ -128,7 +173,7 @@ class Agent:
 
         answer = ask(
             message,
-            system=self.role,
+            system=self._system(),
             model=self.model,
             history=self._history,
             temperature=self.temperature,
@@ -155,7 +200,7 @@ class Agent:
         try:
             for delta in ask_stream(
                 message,
-                system=self.role,
+                system=self._system(),
                 model=self.model,
                 history=self._history,
                 temperature=self.temperature,
@@ -187,6 +232,7 @@ class Agent:
         self._history.clear()
         self.journal.clear()
         self.stats = Stats()
+        self.summary = None
         if self.store:
             self.store.clear(self.session)
 
@@ -208,15 +254,20 @@ class Agent:
         from tokens import MESSAGE_OVERHEAD, REQUEST_OVERHEAD, estimate_text
 
         role = estimate_text(self.role) + MESSAGE_OVERHEAD if self.role else 0
+        # Пересказ уезжает рядом с ролью и place в счёте занимает наравне
+        # с ней — но ВМЕСТО свёрнутых реплик, которых здесь уже нет.
+        summary = (estimate_text(self.summary.content)
+                   if self.summary and self.summary.content else 0)
         history = sum(estimate_text(item.get("content", "")) + MESSAGE_OVERHEAD
                       for item in self._history)
         question = estimate_text(message)
-        total = REQUEST_OVERHEAD + role + history + question
+        total = REQUEST_OVERHEAD + role + summary + history + question
 
         limit = limit_of(self.model)
         return {
             "overhead": REQUEST_OVERHEAD,
             "role": role,
+            "summary": summary,
             "history": history,
             "question": question,
             "total": total,
@@ -227,8 +278,22 @@ class Agent:
 
     @property
     def spent(self) -> float:
-        """Сколько денег утекло за диалог, в долларах."""
-        return cost(self.model, self.stats.prompt_tokens, self.stats.completion_tokens)
+        """Сколько денег утекло за диалог, в долларах — вместе со сжатием."""
+        return cost(self.model,
+                    self.stats.prompt_tokens + self.stats.compression_prompt_tokens,
+                    self.stats.completion_tokens
+                    + self.stats.compression_completion_tokens)
+
+    @property
+    def spent_on_compression(self) -> float:
+        """Во что обошлось само сжатие. Показывать обязательно.
+
+        Экономия, из которой не вычтены накладные расходы, — это не экономия,
+        а способ их спрятать. На коротком диалоге сжатие вполне может стоить
+        дороже, чем сберегает.
+        """
+        return cost(self.model, self.stats.compression_prompt_tokens,
+                    self.stats.compression_completion_tokens)
 
     @property
     def spent_pretty(self) -> str:
@@ -264,12 +329,83 @@ class Agent:
             f"температура {self.temperature}",
             f"помнит {self.remembers} из {self.memory_turns}",
         ]
+        if self.compress:
+            # Берём числа из пересказа, а не из stats: stats.compressions —
+            # счётчик текущего сеанса, он обнуляется при перезапуске, а
+            # summary.rounds лежит на диске и считает за всё время. Иначе
+            # после перезапуска «0 свёрток» соседствовало бы с пересказом
+            # из шести свёрнутых пар.
+            свёрнуто = self.summary.covered if self.summary else 0
+            свёрток = self.summary.rounds if self.summary else 0
+            parts.append(f"сжатие вкл · свёрнуто {свёрнуто} пар "
+                         f"за {свёрток} свёрток")
         if self.store:
             parts.append(f"диалог «{self.session}» · {self.archived} пар в архиве")
             parts.append(str(self.store))
         if self.stats.turns:
             parts.append(f"{self.stats.total_tokens} токенов")
         return " · ".join(parts)
+
+    # ── сжатие истории (день 9) ─────────────────────────────────────────
+    def _system(self) -> str:
+        """Системный промпт: роль, а с дня 9 — ещё и пересказ свёрнутого.
+
+        Пересказ идёт именно сюда, а не в список сообщений. Он не реплика
+        диалога: непонятно, от чьего имени он был бы сказан, и модель начала
+        бы считать его частью разговора. Место ему рядом с ролью — это
+        справка о том, что было раньше.
+        """
+        if not self.summary or not self.summary.content:
+            return self.role
+        return (f"{self.role}\n\n"
+                f"[Ранее в этом диалоге, сжатый пересказ]\n{self.summary.content}")
+
+    def _compress(self, doomed: list[dict]) -> None:
+        """Сворачивает пачку вытесненных пар в пересказ.
+
+        Накопительно: старый пересказ идёт в запрос вместе с новыми репликами.
+        Без этого второе сжатие потеряло бы всё, что запомнило первое, —
+        и агент забывал бы начало разговора ровно так же, как без сжатия,
+        только ещё и за деньги.
+        """
+        if not doomed:
+            return
+
+        куски = []
+        if self.summary and self.summary.content:
+            куски.append(f"Пересказ более раннего:\n{self.summary.content}")
+        реплики = "\n".join(
+            f"{'Пользователь' if m['role'] == 'user' else 'Ассистент'}: {m['content']}"
+            for m in doomed
+        )
+        куски.append(f"Новые реплики, которые надо добавить к пересказу:\n{реплики}")
+
+        answer = ask(
+            "\n\n".join(куски),
+            system=COMPRESS_ROLE,
+            model=self.model,
+            # Низкая температура намеренно: пересказ должен быть скучным
+            # и точным. Разнообразие здесь — это выдуманные подробности.
+            temperature=0.2,
+            provider=self.provider,
+        )
+
+        было = self.summary
+        self.summary = Summary(
+            content=answer.text.strip(),
+            at=now_iso(),
+            covered=(было.covered if было else 0) + len(doomed) // 2,
+            tokens=(было.tokens if было else 0) + answer.prompt_tokens
+            + answer.completion_tokens,
+            rounds=(было.rounds if было else 0) + 1,
+        )
+
+        self.stats.compressions += 1
+        self.stats.compression_prompt_tokens += answer.prompt_tokens
+        self.stats.compression_completion_tokens += answer.completion_tokens
+
+        if self.store:
+            self.store.save_summary(self.session, self.summary)
 
     # ── внутреннее ──────────────────────────────────────────────────────
     def _restore(self) -> None:
@@ -282,10 +418,20 @@ class Agent:
         self._history.clear()
         self.journal.clear()
         self.stats = Stats()
+        self.summary = None
         if not self.store:
             return
 
-        window = self.store.load(self.session, limit=self.memory_turns * 2)
+        # Пересказ поднимаем первым: без него агент после перезапуска
+        # оказался бы с обрывком окна и без всего, что было свёрнуто.
+        self.summary = self.store.load_summary(self.session)
+
+        # В режиме сжатия размер окна задаётся не memory_turns, а парой
+        # keep_last + summarize_every — иначе после перезапуска окно
+        # оказалось бы другого размера, чем до него.
+        глубина = ((self.keep_last + self.summarize_every) if self.compress
+                   else self.memory_turns)
+        window = self.store.load(self.session, limit=глубина * 2)
         self._history.extend(turn.message for turn in window)
 
         totals = self.store.totals(self.session)
@@ -322,15 +468,38 @@ class Agent:
                               Turn("assistant", answer, at, completion_tokens, seconds))
 
     def _trim(self) -> None:
-        """Держит в окне последние memory_turns пар реплик.
+        """Держит окно в рамках. Как именно — зависит от режима.
 
-        Без этого разговор растёт бесконечно: каждый запрос тащит с собой
-        всю переписку, и счёт за токены разгоняется квадратично. С дня 7
-        подрезка перестала быть потерей — подрезанное лежит в архиве.
+        Без сжатия (дни 6–8): лишнее просто выпадает из окна, оставаясь
+        в архиве на диске.
+
+        Со сжатием (день 9): выпадающее сначала сворачивается в пересказ
+        и только потом покидает окно. Держим keep_last пар «как есть»,
+        а накопившуюся сверх них пачку в summarize_every пар отправляем
+        на свёртку — пачкой, а не по одной, иначе на каждую реплику
+        приходился бы лишний запрос к модели.
         """
-        limit = self.memory_turns * 2
-        if len(self._history) > limit:
-            del self._history[:len(self._history) - limit]
+        if not self.compress:
+            limit = self.memory_turns * 2
+            if len(self._history) > limit:
+                del self._history[:len(self._history) - limit]
+            return
+
+        порог = (self.keep_last + self.summarize_every) * 2
+        if len(self._history) <= порог:
+            return
+
+        сколько = self.summarize_every * 2
+        try:
+            self._compress(self._history[:сколько])
+        except LLMError:
+            # Сжатие не удалось — сеть, лимит, что угодно. Реплики НЕ трогаем:
+            # иначе сетевой сбой означал бы потерю памяти. Окно временно
+            # побудет шире, зато ничего не пропадёт, и на следующей реплике
+            # попробуем снова.
+            return
+
+        del self._history[:сколько]
 
 
 __all__ = ["Agent", "Call", "Stats", "LLMError", "DEFAULT_ROLE",
