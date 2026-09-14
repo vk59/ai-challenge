@@ -1,17 +1,19 @@
 #!/bin/bash
 #
-# Собирает macOS-приложение «День 6.app» — агент в отдельном окне.
+# Собирает macOS-приложение «День 7.app» — агент, который помнит диалог
+# между запусками.
 #
 #   ./build_app.sh          собрать
-#   open "dist/День 6.app"  запустить
+#   open "dist/День 7.app"  запустить
 #
-# Почему всё так устроено: macOS не пускает приложения в ~/Documents без явного
-# разрешения (TCC), а репозиторий лежит именно там. Приложение, запущенное из
-# Finder, падало ещё до старта — не мог прочитаться python из .venv. Поэтому:
-#   • рантайм (venv с PyObjC) живёт в ~/Library/Application Support, туда доступ свободный;
-#   • код копируется внутрь бандла, так что для запуска репозиторий не нужен;
-#   • .env копируется туда же — иначе ключ было бы не прочитать. Репозиторий
-#     остаётся источником правды: поменяли ключ — пересобрали.
+# Устройство то же, что в дне 6 (см. его build_app.sh): рантайм и .env живут
+# в ~/Library/Application Support, потому что macOS не пускает приложения
+# в ~/Documents без явного разрешения TCC.
+#
+# Что добавилось в дне 7: хранилище диалогов. Оно не может лежать внутри
+# бандла — пересборка стёрла бы всю переписку, — и не может лежать в репозитории
+# по той же причине TCC. Поэтому уезжает туда же, в Application Support,
+# и путь передаётся через AI_ADVENT_MEMORY_DIR.
 
 set -euo pipefail
 
@@ -19,7 +21,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 SUPPORT="$HOME/Library/Application Support/AI Advent"
 VENV="$SUPPORT/venv"
-APP="$HERE/dist/День 6.app"
+MEMORY="$SUPPORT/memory"
+APP="$HERE/dist/День 7.app"
 
 echo "→ Рантайм"
 if [ ! -x "$VENV/bin/python" ]; then
@@ -42,8 +45,6 @@ iconutil --convert icns "$ICONSET_DIR/icon.iconset" --output "$APP/Contents/Reso
 rm -rf "$ICONSET_DIR"
 
 cp "$HERE"/app.py "$HERE"/web.py "$HERE"/ui.html "$APP/Contents/Resources/"
-# memory.py нужен со дня 7: agent.py его импортирует. Сам день 6 хранилищем
-# не пользуется (Agent создаётся без store), но без файла не пройдёт импорт.
 cp "$ROOT"/shared/agent.py "$ROOT"/shared/llm.py "$ROOT"/shared/memory.py \
    "$APP/Contents/Resources/"
 echo "  код скопирован внутрь"
@@ -53,9 +54,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>                <string>День 6</string>
-  <key>CFBundleDisplayName</key>         <string>День 6 — первый агент</string>
-  <key>CFBundleIdentifier</key>          <string>local.aiadvent.day06</string>
+  <key>CFBundleName</key>                <string>День 7</string>
+  <key>CFBundleDisplayName</key>         <string>День 7 — память между запусками</string>
+  <key>CFBundleIdentifier</key>          <string>local.aiadvent.day07</string>
   <key>CFBundleExecutable</key>          <string>launcher</string>
   <key>CFBundleIconFile</key>            <string>icon</string>
   <key>CFBundlePackageType</key>         <string>APPL</string>
@@ -79,11 +80,19 @@ else
   echo "  .env в репозитории не найден — приложение скажет об этом при запросе"
 fi
 
+mkdir -p "$MEMORY"
+echo "  хранилище диалогов: $MEMORY"
+if [ -e "$MEMORY/agent.db" ]; then
+  echo "  прошлые диалоги на месте — пересборка их не трогает"
+fi
+
 cat > "$APP/Contents/MacOS/launcher" <<LAUNCHER
 #!/bin/sh
-# .env лежит рядом с рантаймом: в ~/Documents macOS приложение не пускает.
+# .env и история лежат рядом с рантаймом: в ~/Documents приложение не пускают.
+# История принципиально снаружи бандла — иначе ./build_app.sh стирал бы память.
 AI_ADVENT_ENV_FILE="$SUPPORT/.env"
-export AI_ADVENT_ENV_FILE
+AI_ADVENT_MEMORY_DIR="$MEMORY"
+export AI_ADVENT_ENV_FILE AI_ADVENT_MEMORY_DIR
 RESOURCES="\$(cd "\$(dirname "\$0")/../Resources" && pwd)"
 exec "$VENV/bin/python" "\$RESOURCES/app.py"
 LAUNCHER
@@ -97,5 +106,8 @@ touch "$APP"   # иначе Finder может показывать иконку 
 echo
 echo "Готово: $APP"
 echo "Запустить:  open \"$APP\""
+echo
+echo "Проверка задания: написать что-нибудь, закрыть на ⌘Q, открыть снова —"
+echo "диалог должен оказаться на месте."
 echo
 echo "После правок в коде или смены ключа в .env — пересобрать: ./build_app.sh"

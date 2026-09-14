@@ -10,7 +10,8 @@
 │   └── day-01-first-api-call/
 │       ├── README.md      # условие задания + что сделано + как запустить
 │       └── main.py
-├── shared/                # общий код: llm.py — транспорт, agent.py — агент (день 6)
+├── shared/                # общий код: llm.py — транспорт, agent.py — агент (день 6),
+│                          # memory.py — хранилище диалогов (день 7)
 ├── docs/
 │   ├── rules.md           # правила потока, дедлайны, чек-лист подготовки
 │   └── submissions.md     # ссылки, которые сдаём в таблицу
@@ -33,6 +34,7 @@
 | 04 | Температура | [days/day-04-temperature](days/day-04-temperature) | ✅ код готов, нужно видео |
 | 05 | Версии моделей | [days/day-05-model-tiers](days/day-05-model-tiers) | ✅ код готов, нужно видео |
 | 06 | Первый агент | [days/day-06-first-agent](days/day-06-first-agent) | ✅ код готов, нужно видео |
+| 07 | Сохранение контекста | [days/day-07-memory](days/day-07-memory) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 
