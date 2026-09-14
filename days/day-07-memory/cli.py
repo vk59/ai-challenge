@@ -5,6 +5,12 @@
     python3 cli.py --session работа         другой диалог
     python3 cli.py --store json             хранить в JSON, а не в SQLite
     python3 cli.py --dir /tmp/память        другой каталог хранилища
+    python3 cli.py --memory 2               окно контекста в 2 пары вместо 10
+
+Флаг --memory нужен, чтобы увидеть разницу между окном и архивом, не набивая
+для этого одиннадцать реплик: с --memory 2 третий вопрос уже вытесняет первый
+из окна, но не из архива. На диске лежит весь разговор, в модель уезжают
+последние две пары — это видно в /история пометками «вне окна».
 
 Команды в чате: /стат, /сброс, /роль, /журнал, /история, /сессии, /выход
 
@@ -135,14 +141,23 @@ def replay(agent: Agent) -> None:
 
 
 def parse_args(args: list[str]) -> dict:
-    """Разбор флагов руками: ради четырёх опций argparse не нужен."""
-    options = {"role": None, "session": "default", "store": "sqlite", "dir": None}
-    for flag in ("--role", "--session", "--store", "--dir"):
+    """Разбор флагов руками: ради пяти опций argparse не нужен."""
+    options = {"role": None, "session": "default", "store": "sqlite",
+               "dir": None, "memory": None}
+    for flag in ("--role", "--session", "--store", "--dir", "--memory"):
         if flag in args:
             index = args.index(flag)
             if index + 1 >= len(args):
                 raise SystemExit(f"У флага {flag} не хватает значения")
             options[flag[2:]] = args[index + 1]
+
+    if options["memory"] is not None:
+        try:
+            options["memory"] = int(options["memory"])
+        except ValueError:
+            raise SystemExit("У флага --memory должно быть число пар реплик") from None
+        if options["memory"] < 1:
+            raise SystemExit("Окно контекста меньше одной пары не имеет смысла")
     return options
 
 
@@ -160,6 +175,7 @@ def main() -> int:
         store=store,
         session=options["session"],
         **({"role": options["role"]} if options["role"] else {}),
+        **({"memory_turns": options["memory"]} if options["memory"] else {}),
     )
 
     print(paint(BOLD, f"\n  {agent.name}"))
@@ -206,18 +222,47 @@ def main() -> int:
             continue
 
         print(paint(GREEN, f"{agent.name.lower()} › "), end="", flush=True)
+
+        # Между Enter и первым токеном модель молчит — обычно секунду-две, но
+        # если API занят, то и полминуты. Пустой экран в это время неотличим
+        # от зависшей программы, поэтому ставим метку и стираем её забоем,
+        # как только пришёл первый кусок ответа.
+        hint = "думает…"
+        erase = "\b" * len(hint) + " " * len(hint) + "\b" * len(hint)
+        if TTY:
+            print(paint(DIM, hint), end="", flush=True)
+        waiting = TTY
+
+        def stop_waiting() -> None:
+            """Убирает метку. Вызывается на любом исходе, не только успешном."""
+            nonlocal waiting
+            if waiting:
+                print(erase, end="", flush=True)
+                waiting = False
+
         try:
             for piece in agent.stream(message):
+                stop_waiting()
                 print(piece, end="", flush=True)
         except LLMError as exc:
+            stop_waiting()
             print(paint(RED, f"\n  Ошибка: {exc}"))
             continue
         except MemoryError_ as exc:
+            stop_waiting()
             print(paint(RED, f"\n  Ответ получен, но не сохранён: {exc}"))
             continue
         except KeyboardInterrupt:
             # Оборванный ответ агент всё равно записал — тем, что успело прийти.
+            stop_waiting()
             print(paint(DIM, "\n  прервано (сохранено то, что успело прийти)"))
+            continue
+        stop_waiting()
+
+        # Пустой ответ модели — редкость, но тогда агенту нечего запоминать,
+        # и журнал останется пустым. Без проверки здесь был бы IndexError.
+        if not agent.journal:
+            print(paint(DIM, "\n  Модель вернула пустой ответ — записывать нечего.\n"))
             continue
 
         last = agent.journal[-1]
