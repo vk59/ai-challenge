@@ -44,7 +44,7 @@ rm -rf "$ICONSET_DIR"
 cp "$HERE"/app.py "$HERE"/web.py "$HERE"/ui.html "$APP/Contents/Resources/"
 # memory.py нужен со дня 7: agent.py его импортирует. Сам день 6 хранилищем
 # не пользуется (Agent создаётся без store), но без файла не пройдёт импорт.
-cp "$ROOT"/shared/agent.py "$ROOT"/shared/llm.py "$ROOT"/shared/memory.py \
+cp "$ROOT"/shared/agent.py "$ROOT"/shared/llm.py "$ROOT"/shared/memory.py "$ROOT"/shared/tokens.py \
    "$APP/Contents/Resources/"
 echo "  код скопирован внутрь"
 

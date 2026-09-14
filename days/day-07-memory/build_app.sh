@@ -45,7 +45,7 @@ iconutil --convert icns "$ICONSET_DIR/icon.iconset" --output "$APP/Contents/Reso
 rm -rf "$ICONSET_DIR"
 
 cp "$HERE"/app.py "$HERE"/web.py "$HERE"/ui.html "$APP/Contents/Resources/"
-cp "$ROOT"/shared/agent.py "$ROOT"/shared/llm.py "$ROOT"/shared/memory.py \
+cp "$ROOT"/shared/agent.py "$ROOT"/shared/llm.py "$ROOT"/shared/memory.py "$ROOT"/shared/tokens.py \
    "$APP/Contents/Resources/"
 echo "  код скопирован внутрь"
 

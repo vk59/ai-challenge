@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 
 from llm import LLMError, Provider, ask, ask_stream
 from memory import DEFAULT_SESSION, Store, Turn, now_iso
+from tokens import cost, estimate_request, limit_of, money
 
 # Явно, а не через DEFAULT_MODEL из llm: там стоит алиас deepseek-chat,
 # который на самом деле routes на v4-flash (выяснилось в дне 5). Агент
@@ -50,6 +51,11 @@ class Stats:
     @property
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
+
+    @property
+    def average_prompt(self) -> float:
+        """Средний вес запроса. Растёт по мере диалога — в этом вся суть."""
+        return self.prompt_tokens / self.turns if self.turns else 0.0
 
 
 @dataclass
@@ -188,6 +194,45 @@ class Agent:
         """Перейти в другой диалог. Текущий остаётся на диске нетронутым."""
         self.session = session or DEFAULT_SESSION
         self._restore()
+
+    def weigh(self, message: str = "") -> dict:
+        """Сколько будет стоить следующий запрос — ДО того, как он отправлен.
+
+        Точных чисел до отправки взять неоткуда, это оценка (см. tokens.py).
+        Нужна она затем, чтобы узнать цену заранее: влезет ли в окно модели,
+        во что обойдётся реплика, не пора ли подрезать историю.
+
+        Разложено по частям намеренно. Обычно удивляет не размер вопроса,
+        а то, что роль и вся история оплачиваются заново в каждом запросе.
+        """
+        from tokens import MESSAGE_OVERHEAD, REQUEST_OVERHEAD, estimate_text
+
+        role = estimate_text(self.role) + MESSAGE_OVERHEAD if self.role else 0
+        history = sum(estimate_text(item.get("content", "")) + MESSAGE_OVERHEAD
+                      for item in self._history)
+        question = estimate_text(message)
+        total = REQUEST_OVERHEAD + role + history + question
+
+        limit = limit_of(self.model)
+        return {
+            "overhead": REQUEST_OVERHEAD,
+            "role": role,
+            "history": history,
+            "question": question,
+            "total": total,
+            "limit": limit,
+            "share": (total / limit) if limit else 0.0,
+            "cost": cost(self.model, total, 0),
+        }
+
+    @property
+    def spent(self) -> float:
+        """Сколько денег утекло за диалог, в долларах."""
+        return cost(self.model, self.stats.prompt_tokens, self.stats.completion_tokens)
+
+    @property
+    def spent_pretty(self) -> str:
+        return money(self.spent)
 
     def transcript(self) -> list[Turn]:
         """Весь архив сессии — для интерфейса, а не для модели.
