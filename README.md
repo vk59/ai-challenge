@@ -29,16 +29,17 @@
 
 | День | Задание | Папка | Статус |
 |------|---------|-------|--------|
-| 01 | Первый запрос к LLM через API | [days/day-01-first-api-call](days/day-01-first-api-call) | ✅ код готов, нужно видео |
-| 02 | Формат ответа | [days/day-02-response-format](days/day-02-response-format) | ✅ код готов, нужно видео |
-| 03 | Разные способы рассуждения | [days/day-03-reasoning-modes](days/day-03-reasoning-modes) | ✅ код готов, нужно видео |
-| 04 | Температура | [days/day-04-temperature](days/day-04-temperature) | ✅ код готов, нужно видео |
-| 05 | Версии моделей | [days/day-05-model-tiers](days/day-05-model-tiers) | ✅ код готов, нужно видео |
-| 06 | Первый агент | [days/day-06-first-agent](days/day-06-first-agent) | ✅ код готов, нужно видео |
-| 07 | Сохранение контекста | [days/day-07-memory](days/day-07-memory) | ✅ код готов, нужно видео |
-| 08 | Работа с токенами | [days/day-08-tokens](days/day-08-tokens) | ✅ код готов, нужно видео |
-| 09 | Сжатие истории | [days/day-09-compression](days/day-09-compression) | ✅ код готов, нужно видео |
-| 10 | Стратегии контекста | [days/day-10-strategies](days/day-10-strategies) | ✅ код готов, нужно видео |
+| 01 | Первый запрос к LLM через API | [days/day-01-first-api-call](days/day-01-first-api-call) | ✅ сдано |
+| 02 | Формат ответа | [days/day-02-response-format](days/day-02-response-format) | ✅ сдано |
+| 03 | Разные способы рассуждения | [days/day-03-reasoning-modes](days/day-03-reasoning-modes) | ✅ сдано |
+| 04 | Температура | [days/day-04-temperature](days/day-04-temperature) | ✅ сдано |
+| 05 | Версии моделей | [days/day-05-model-tiers](days/day-05-model-tiers) | ✅ сдано |
+| 06 | Первый агент | [days/day-06-first-agent](days/day-06-first-agent) | ✅ сдано |
+| 07 | Сохранение контекста | [days/day-07-memory](days/day-07-memory) | ✅ сдано |
+| 08 | Работа с токенами | [days/day-08-tokens](days/day-08-tokens) | ✅ сдано |
+| 09 | Сжатие истории | [days/day-09-compression](days/day-09-compression) | ✅ сдано |
+| 10 | Стратегии контекста | [days/day-10-strategies](days/day-10-strategies) | ✅ сдано |
+| 11 | Модель памяти агента | [days/day-11-memory-model](days/day-11-memory-model) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 

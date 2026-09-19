@@ -169,6 +169,44 @@ class Summary:
         )
 
 
+# Слои памяти (день 11). Отличаются не форматом, а ОБЛАСТЬЮ ЖИЗНИ:
+#
+#   SHORT   текущий диалог — реплики, живут в сессии, вытесняются окном
+#   WORKING данные текущей задачи — факты, живут в сессии, переживают окно
+#   LONG    профиль, решения, знания — живут ВНЕ сессий, общие для всех
+#
+# Граница между WORKING и LONG проходит именно по области: рабочая память
+# умирает вместе с задачей, долговременная переезжает в следующий диалог.
+# Если бы обе лежали в сессии, разделение было бы косметическим.
+SHORT, WORKING, LONG = "short", "working", "long"
+LAYERS = (SHORT, WORKING, LONG)
+
+# Подтипы долговременной памяти — три, как просит задание.
+PROFILE, DECISION, KNOWLEDGE = "profile", "decision", "knowledge"
+LONG_KINDS = (PROFILE, DECISION, KNOWLEDGE)
+
+
+@dataclass
+class Memo:
+    """Запись долговременной памяти — живёт вне всякой сессии (день 11)."""
+
+    key: str
+    value: str
+    kind: str = PROFILE      # profile | decision | knowledge
+    at: str = ""
+    source: str = ""         # из какого диалога приехало, для проверяемости
+
+    def as_dict(self) -> dict:
+        return {"key": self.key, "value": self.value, "kind": self.kind,
+                "at": self.at, "source": self.source}
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Memo":
+        return cls(key=str(raw.get("key", "")), value=str(raw.get("value", "")),
+                   kind=str(raw.get("kind", PROFILE)), at=str(raw.get("at", "")),
+                   source=str(raw.get("source", "")))
+
+
 @dataclass
 class Fact:
     """Один факт из диалога — ключ и значение (день 10).
@@ -234,6 +272,19 @@ class Store:
 
     def load_facts(self, session: str) -> list[Fact]:
         """Факты сессии; пустой список — если их ещё не извлекали."""
+        raise NotImplementedError
+
+    # ── долговременная память, вне сессий (день 11) ─────────────────────
+    def remember(self, memo: Memo) -> None:
+        """Записать в долговременную память. Ключ уникален глобально."""
+        raise NotImplementedError
+
+    def recall(self, kind: str | None = None) -> list[Memo]:
+        """Достать долговременную память; kind — отфильтровать по подтипу."""
+        raise NotImplementedError
+
+    def forget(self, key: str) -> bool:
+        """Забыть одну запись навсегда. True — если было что забывать."""
         raise NotImplementedError
 
     def fork(self, session: str, branch: str, upto: int) -> int:
@@ -371,6 +422,53 @@ class JsonStore(Store):
     def load_facts(self, session: str) -> list[Fact]:
         return [Fact.from_dict(r) for r in self._read(session).get("facts") or []]
 
+    # Долговременная память в отдельном файле, а не в файле сессии — она
+    # и по смыслу вне сессий, и физически должна лежать отдельно, иначе
+    # удаление диалога унесло бы с собой профиль пользователя.
+    def _long_path(self) -> Path:
+        return self.dir / "_longterm.json"
+
+    def remember(self, memo: Memo) -> None:
+        with self._lock:
+            записи = {m.key: m for m in self._read_long()}
+            записи[memo.key] = memo
+            self._write_long(list(записи.values()))
+
+    def recall(self, kind: str | None = None) -> list[Memo]:
+        записи = self._read_long()
+        if kind:
+            записи = [m for m in записи if m.kind == kind]
+        return sorted(записи, key=lambda m: (m.kind, m.key))
+
+    def forget(self, key: str) -> bool:
+        with self._lock:
+            записи = self._read_long()
+            осталось = [m for m in записи if m.key != key]
+            if len(осталось) == len(записи):
+                return False
+            self._write_long(осталось)
+            return True
+
+    def _read_long(self) -> list[Memo]:
+        try:
+            raw = json.loads(self._long_path().read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return []
+        except (json.JSONDecodeError, OSError) as exc:
+            raise MemoryError_(f"Долговременная память повреждена: {exc}") from exc
+        return [Memo.from_dict(r) for r in raw.get("memos") or []]
+
+    def _write_long(self, записи: list[Memo]) -> None:
+        путь = self._long_path()
+        tmp = путь.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps({"memos": [m.as_dict() for m in записи]},
+                                      ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, путь)
+        except OSError as exc:
+            tmp.unlink(missing_ok=True)
+            raise MemoryError_(f"Не пишется долговременная память: {exc}") from exc
+
     # ── внутреннее ──────────────────────────────────────────────────────
     def _path(self, session: str) -> Path:
         return self.dir / f"{_safe_name(session)}.json"
@@ -452,6 +550,17 @@ class SqliteStore(Store):
         value    TEXT    NOT NULL,
         at       TEXT    NOT NULL DEFAULT '',
         PRIMARY KEY (session, key)
+    );
+
+    -- Долговременная память (день 11). Обратите внимание: колонки session
+    -- здесь НЕТ, и это главное отличие слоя. Профиль, решения и знания
+    -- общие для всех диалогов и переезжают из одного в другой.
+    CREATE TABLE IF NOT EXISTS longterm (
+        key      TEXT    PRIMARY KEY,
+        value    TEXT    NOT NULL,
+        kind     TEXT    NOT NULL DEFAULT 'profile',
+        at       TEXT    NOT NULL DEFAULT '',
+        source   TEXT    NOT NULL DEFAULT ''
     );
     """
 
@@ -570,6 +679,33 @@ class SqliteStore(Store):
             ).fetchall()
         return [Fact(*row) for row in rows]
 
+    def remember(self, memo: Memo) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO longterm (key, value, kind, at, source)"
+                " VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value,"
+                "   kind = excluded.kind, at = excluded.at, source = excluded.source",
+                (memo.key, memo.value, memo.kind, memo.at, memo.source),
+            )
+
+    def recall(self, kind: str | None = None) -> list[Memo]:
+        with self._connect() as db:
+            if kind:
+                rows = db.execute(
+                    "SELECT key, value, kind, at, source FROM longterm"
+                    " WHERE kind = ? ORDER BY key", (kind,)).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT key, value, kind, at, source FROM longterm"
+                    " ORDER BY kind, key").fetchall()
+        return [Memo(*row) for row in rows]
+
+    def forget(self, key: str) -> bool:
+        with self._connect() as db:
+            cur = db.execute("DELETE FROM longterm WHERE key = ?", (key,))
+            return cur.rowcount > 0
+
     # ── внутреннее ──────────────────────────────────────────────────────
     @contextmanager
     def _connect(self):
@@ -613,5 +749,7 @@ def _safe_name(session: str) -> str:
 
 
 __all__ = ["Store", "JsonStore", "SqliteStore", "Turn", "SessionInfo", "Totals",
-           "Summary", "Fact", "open_store", "default_dir", "now_iso", "local_time",
-           "DEFAULT_SESSION", "ENV_DIR_VAR", "MemoryError_"]
+           "Summary", "Fact", "Memo", "open_store", "default_dir", "now_iso",
+           "local_time", "DEFAULT_SESSION", "ENV_DIR_VAR", "MemoryError_",
+           "SHORT", "WORKING", "LONG", "LAYERS",
+           "PROFILE", "DECISION", "KNOWLEDGE", "LONG_KINDS"]

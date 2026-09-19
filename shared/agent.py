@@ -26,7 +26,9 @@ from dataclasses import dataclass, field
 import json as _json
 
 from llm import LLMError, Provider, ask, ask_stream
-from memory import DEFAULT_SESSION, Fact, Store, Summary, Turn, now_iso
+from memory import (DECISION, DEFAULT_SESSION, KNOWLEDGE, LONG, LONG_KINDS,
+                    PROFILE, SHORT, WORKING, Fact, Memo, Store, Summary, Turn,
+                    now_iso)
 from tokens import cost, estimate_request, limit_of, money
 
 # Стратегии управления контекстом (день 10).
@@ -51,6 +53,26 @@ FACTS_ROLE = (
 # всё уходит в размышление, а content приходит ПУСТЫМ с finish=length.
 # Отсюда запас: полторы тысячи там, где видимого текста на две сотни.
 FACTS_MAX_TOKENS = 1500
+
+# День 11: разбор реплики по слоям памяти. Модель не просто извлекает факты,
+# а СРАЗУ говорит, куда их класть, — это и есть «явно выбирать, что и куда
+# сохраняется». Решение принимается по одному признаку: переживёт ли факт
+# текущую задачу.
+ROUTER_ROLE = (
+    "Ты раскладываешь информацию из диалога по слоям памяти ассистента. "
+    "Верни JSON с двумя ключами: \"working\" и \"long\".\n\n"
+    "working — плоский объект «ключ: значение» с данными ТЕКУЩЕЙ задачи: "
+    "требования, цифры, сроки, статус. Всё, что перестанет быть нужным, "
+    "когда задача закончится.\n\n"
+    "long — массив объектов {\"key\", \"value\", \"kind\"}, где kind это "
+    "profile, decision или knowledge. Сюда идёт только то, что пригодится "
+    "и в ДРУГИХ разговорах: profile — про самого человека (имя, роль, "
+    "предпочтения, как с ним общаться); decision — принятое решение, "
+    "которое действует дальше; knowledge — устойчивый факт о мире или "
+    "продукте.\n\n"
+    "Если для слоя ничего нет — верни пустой объект или пустой массив. "
+    "Ничего не выдумывай. Ключи короткие, по-русски."
+)
 
 # Промпт сжатия. Требования к нему жёсткие и неочевидные: пересказ должен
 # сохранять то, о чём агента потом спросят, — имена, числа, договорённости,
@@ -209,6 +231,12 @@ class Agent:
         self.strategy = strategy
         self.facts: list[Fact] = []
 
+        # День 11: третий слой. facts (рабочая память) живут в сессии
+        # и умирают вместе с задачей, memos (долговременная) — вне сессий
+        # и переезжают в следующий диалог. Это не формат, это область жизни.
+        self.memos: list[Memo] = []
+        self.layered = False        # включает раскладку по слоям при ответе
+
         self._history: list[dict] = []
         self.stats = Stats()
         self.journal: list[Call] = []
@@ -284,6 +312,8 @@ class Agent:
         self.stats = Stats()
         self.summary = None
         self.facts = []
+        # memos НЕ трогаем: «стереть диалог» не должно означать «забыть
+        # человека». Для долговременной памяти есть отдельный forget().
         if self.store:
             self.store.clear(self.session)
 
@@ -310,10 +340,11 @@ class Agent:
         summary = (estimate_text(self.summary.content)
                    if self.summary and self.summary.content else 0)
         facts = sum(estimate_text(f"- {f.key}: {f.value}") for f in self.facts)
+        memos = sum(estimate_text(f"- {m.key}: {m.value}") for m in self.memos)
         history = sum(estimate_text(item.get("content", "")) + MESSAGE_OVERHEAD
                       for item in self._history)
         question = estimate_text(message)
-        total = REQUEST_OVERHEAD + role + summary + facts + history + question
+        total = REQUEST_OVERHEAD + role + summary + facts + memos + history + question
 
         limit = limit_of(self.model)
         return {
@@ -321,6 +352,7 @@ class Agent:
             "role": role,
             "summary": summary,
             "facts": facts,
+            "memos": memos,
             "history": history,
             "question": question,
             "total": total,
@@ -412,12 +444,157 @@ class Agent:
         if self.summary and self.summary.content:
             куски.append("[Ранее в этом диалоге, сжатый пересказ]\n"
                          + self.summary.content)
+        # Долговременная память идёт ПЕРЕД рабочей: она про человека и про
+        # действующие решения, и на неё агент должен опираться, даже когда
+        # задача сменилась.
+        if self.memos:
+            по_видам: dict[str, list[Memo]] = {}
+            for m in self.memos:
+                по_видам.setdefault(m.kind, []).append(m)
+            подписи = {PROFILE: "О собеседнике", DECISION: "Действующие решения",
+                       KNOWLEDGE: "Что известно"}
+            for вид in LONG_KINDS:
+                if вид in по_видам:
+                    строки = "\n".join(f"- {m.key}: {m.value}" for m in по_видам[вид])
+                    куски.append(f"[{подписи[вид]}]\n{строки}")
         if self.facts:
             # Факты идут туда же, куда пересказ, и по той же причине: это
             # справка о диалоге, а не реплика в нём.
             карточка = "\n".join(f"- {f.key}: {f.value}" for f in self.facts)
-            куски.append(f"[Известные факты по проекту]\n{карточка}")
+            куски.append(f"[Текущая задача]\n{карточка}")
         return "\n\n".join(куски)
+
+    # ── слои памяти (день 11) ───────────────────────────────────────────
+    def remember(self, key: str, value: str, *, layer: str = LONG,
+                 kind: str = PROFILE) -> None:
+        """Положить что-то в память ЯВНО, указав слой своими руками.
+
+        Автоматическая раскладка ошибается, и должен быть способ поправить
+        её руками — иначе «модель памяти» превращается в чёрный ящик.
+        """
+        if layer == WORKING:
+            карта = {f.key: f for f in self.facts}
+            карта[key] = Fact(key, value, now_iso())
+            self.facts = sorted(карта.values(), key=lambda f: f.key)
+            if self.store:
+                self.store.save_facts(self.session, self.facts)
+            return
+        if layer == LONG:
+            memo = Memo(key, value, kind, now_iso(), self.session)
+            карта = {m.key: m for m in self.memos}
+            карта[key] = memo
+            self.memos = sorted(карта.values(), key=lambda m: (m.kind, m.key))
+            if self.store:
+                self.store.remember(memo)
+            return
+        raise ValueError(f"В слой {layer!r} писать напрямую нельзя: "
+                         f"краткосрочная память — это сами реплики")
+
+    def forget(self, key: str) -> bool:
+        """Забыть запись долговременной памяти навсегда."""
+        было = len(self.memos)
+        self.memos = [m for m in self.memos if m.key != key]
+        стёрли = len(self.memos) != было
+        if self.store and self.store.forget(key):
+            стёрли = True
+        return стёрли
+
+    def layers(self) -> dict:
+        """Снимок всех трёх слоёв — для интерфейса и для проверки.
+
+        Главное, что здесь видно: у слоёв разная ОБЛАСТЬ. Краткосрочная
+        и рабочая привязаны к сессии, долговременная — нет.
+        """
+        return {
+            SHORT: {
+                "область": f"диалог «{self.session}»",
+                "в окне": self.remembers,
+                "потолок": self.memory_turns,
+                "в архиве": self.archived,
+                "реплики": [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in self._history
+                ],
+            },
+            WORKING: {
+                "область": f"диалог «{self.session}»",
+                "записей": len(self.facts),
+                "items": [{"key": f.key, "value": f.value} for f in self.facts],
+            },
+            LONG: {
+                "область": "все диалоги",
+                "записей": len(self.memos),
+                "items": [{"key": m.key, "value": m.value, "kind": m.kind,
+                           "source": m.source} for m in self.memos],
+            },
+        }
+
+    def _route(self, question: str, answer: str) -> dict:
+        """Раскладывает свежую реплику по слоям и возвращает, что куда легло.
+
+        Один запрос к модели на обе цели сразу: и рабочая память, и
+        долговременная. Два отдельных запроса стоили бы вдвое дороже,
+        а решение принимается по одному и тому же признаку — переживёт ли
+        факт текущую задачу.
+        """
+        рабочее = "\n".join(f"{f.key}: {f.value}" for f in self.facts) or "(пусто)"
+        долгое = "\n".join(f"{m.kind}/{m.key}: {m.value}" for m in self.memos) or "(пусто)"
+        запрос = (f"Рабочая память (текущая задача):\n{рабочее}\n\n"
+                  f"Долговременная память:\n{долгое}\n\n"
+                  f"Новая реплика пользователя:\n{question}\n\n"
+                  f"Ответ ассистента:\n{answer}\n\n"
+                  f"Разложи по слоям и верни JSON.")
+
+        ответ = ask(запрос, system=ROUTER_ROLE, model=self.model, json_mode=True,
+                    temperature=0.1, max_tokens=FACTS_MAX_TOKENS,
+                    provider=self.provider)
+
+        self.stats.extractions += 1
+        self.stats.extraction_prompt_tokens += ответ.prompt_tokens
+        self.stats.extraction_completion_tokens += ответ.completion_tokens
+
+        сырой = (ответ.text or "").strip()
+        if not сырой:
+            return {"working": [], "long": []}
+        try:
+            разобрано = _json.loads(сырой)
+        except _json.JSONDecodeError:
+            return {"working": [], "long": []}
+        if not isinstance(разобрано, dict):
+            return {"working": [], "long": []}
+
+        сейчас = now_iso()
+        новое = {"working": [], "long": []}
+
+        рабочие = разобрано.get("working")
+        if isinstance(рабочие, dict) and рабочие:
+            self.facts = [Fact(str(k), str(v), сейчас)
+                          for k, v in рабочие.items() if str(v).strip()]
+            новое["working"] = [f.key for f in self.facts]
+            if self.store:
+                self.store.save_facts(self.session, self.facts)
+
+        долгие = разобрано.get("long")
+        if isinstance(долгие, list):
+            карта = {m.key: m for m in self.memos}
+            for запись in долгие:
+                if not isinstance(запись, dict):
+                    continue
+                ключ = str(запись.get("key", "")).strip()
+                значение = str(запись.get("value", "")).strip()
+                вид = str(запись.get("kind", PROFILE)).strip()
+                if not ключ or not значение:
+                    continue
+                if вид not in LONG_KINDS:
+                    вид = KNOWLEDGE
+                memo = Memo(ключ, значение, вид, сейчас, self.session)
+                карта[ключ] = memo
+                новое["long"].append(f"{вид}/{ключ}")
+                if self.store:
+                    self.store.remember(memo)
+            self.memos = sorted(карта.values(), key=lambda m: (m.kind, m.key))
+
+        return новое
 
     # ── факты, стратегия «Sticky Facts» (день 10) ───────────────────────
     def _extract_facts(self, question: str, answer: str) -> None:
@@ -555,6 +732,9 @@ class Agent:
         # оказался бы с обрывком окна и без всего, что было свёрнуто.
         self.summary = self.store.load_summary(self.session)
         self.facts = self.store.load_facts(self.session)
+        # Долговременная память грузится независимо от сессии — в этом
+        # и смысл слоя: она уже была здесь до этого диалога.
+        self.memos = self.store.recall()
 
         # В режиме сжатия размер окна задаётся не memory_turns, а парой
         # keep_last + summarize_every — иначе после перезапуска окно
@@ -600,7 +780,15 @@ class Agent:
         # Карточка фактов обновляется после каждой реплики — как требует
         # задание. Сбой извлечения не должен ронять диалог: факты останутся
         # прежними, разговор продолжится.
-        if self.strategy == "facts":
+        if self.layered:
+            # День 11: раскладка по слоям заменяет простое извлечение фактов —
+            # она делает то же самое и вдобавок решает, что достойно
+            # долговременной памяти.
+            try:
+                self._route(question, answer)
+            except LLMError:
+                pass
+        elif self.strategy == "facts":
             try:
                 self._extract_facts(question, answer)
             except LLMError:
