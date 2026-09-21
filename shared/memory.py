@@ -286,6 +286,49 @@ TRANSITIONS: dict[str, tuple[str, ...]] = {
 STAGE_LABELS = {PLANNING: "планирование", EXECUTION: "выполнение",
                 VALIDATION: "проверка", DONE: "готово"}
 
+# Условия на переходах (день 15). Ребро в TRANSITIONS есть — а пройти по нему
+# нельзя, пока не выполнено требование. Это и есть «нельзя делать реализацию
+# до утверждённого плана»: ребро planning → execution существует, но заперто.
+#
+# Ключ отметки ставит ЧЕЛОВЕК, а не модель. Если бы галочку «план утверждён»
+# проставляла сама модель, условие не гарантировало бы ничего: она бы
+# утвердила собственный план и пошла дальше.
+GUARDS: dict[tuple[str, str], tuple[str, str]] = {
+    (PLANNING, EXECUTION): ("plan_approved", "план утверждён"),
+    (VALIDATION, DONE): ("validation_passed", "проверка пройдена"),
+}
+
+# Что агенту можно и чего нельзя на каждом этапе (день 15).
+#
+# В дне 13 автомат только описывал, где задача. Здесь он управляет поведением:
+# на планировании агент не пишет реализацию, даже если прямо просят, и
+# объясняет, чего не хватает. Без этого «контролируемый жизненный цикл»
+# оставался бы ярлыком в интерфейсе.
+STAGE_RIGHTS: dict[str, dict[str, str]] = {
+    PLANNING: {
+        "можно": "уточнять требования, предлагать варианты, составлять "
+                 "и править план, оценивать трудоёмкость",
+        "нельзя": "писать реализацию, выдавать готовый код функциональности, "
+                  "миграции и конфигурации — пока план не утверждён человеком",
+    },
+    EXECUTION: {
+        "можно": "реализовывать утверждённый план, писать код, разбирать "
+                 "возникающие по ходу проблемы",
+        "нельзя": "объявлять задачу готовой и подводить итоги в обход проверки",
+    },
+    VALIDATION: {
+        "можно": "проверять сделанное, искать дефекты, предлагать правки "
+                 "по найденному",
+        "нельзя": "добавлять новую функциональность сверх плана и объявлять "
+                  "задачу завершённой, пока проверка не отмечена пройденной",
+    },
+    DONE: {
+        "можно": "отвечать на вопросы по уже сделанному",
+        "нельзя": "продолжать доработки — задача закрыта, для нового объёма "
+                  "нужна новая задача",
+    },
+}
+
 
 @dataclass
 class TaskState:
@@ -306,6 +349,9 @@ class TaskState:
     # История переходов — короткий список, запросов по нему не делаем,
     # поэтому хранится одним JSON-полем, а не отдельной таблицей.
     log: list = field(default_factory=list)
+    # Отметки-условия (день 15): {"plan_approved": "2026-09-22T10:00:00+00:00"}.
+    # Ставит человек, снимаются автоматически при возврате назад.
+    approved: dict = field(default_factory=dict)
 
     @property
     def label(self) -> str:
@@ -313,14 +359,53 @@ class TaskState:
 
     @property
     def allowed(self) -> tuple[str, ...]:
-        """Куда отсюда можно перейти. Пустой кортеж — тупик (done)."""
+        """Куда отсюда ведут рёбра. Пройти по ребру можно не всегда — см. guard_for."""
         return TRANSITIONS.get(self.stage, ())
 
     def can_go(self, to: str) -> bool:
         return to in self.allowed
 
-    def as_prompt(self) -> str:
-        """Состояние в виде куска системного промпта."""
+    # ── условия переходов (день 15) ─────────────────────────────────────
+    def guard_for(self, to: str) -> tuple[str, str] | None:
+        """Требование на ребре отсюда в to, если оно есть."""
+        return GUARDS.get((self.stage, to))
+
+    def is_met(self, key: str) -> bool:
+        return bool(self.approved.get(key))
+
+    def blocked(self, to: str) -> str:
+        """Чем заперт переход. Пустая строка — не заперт."""
+        условие = self.guard_for(to)
+        if условие is None:
+            return ""
+        ключ, подпись = условие
+        return "" if self.is_met(ключ) else подпись
+
+    @property
+    def gates(self) -> list[dict]:
+        """Все условия на исходящих рёбрах — для интерфейса."""
+        собрано = []
+        for цель in self.allowed:
+            условие = self.guard_for(цель)
+            собрано.append({
+                "stage": цель, "label": STAGE_LABELS[цель],
+                "guard": условие[1] if условие else "",
+                "key": условие[0] if условие else "",
+                "met": self.is_met(условие[0]) if условие else True,
+            })
+        return собрано
+
+    @property
+    def rights(self) -> dict[str, str]:
+        return STAGE_RIGHTS.get(self.stage, {})
+
+    def as_prompt(self, *, with_rights: bool = False) -> str:
+        """Состояние в виде куска системного промпта.
+
+        with_rights — день 15: добавляет блок прав этапа и отметки о том,
+        какие переходы заперты. По умолчанию выключено, чтобы день 13
+        с тем же автоматом остался ровно таким, каким его записали.
+        """
         строки = [f"- этап: {self.label}"]
         if self.goal:
             строки.insert(0, f"- задача: {self.goal}")
@@ -329,19 +414,40 @@ class TaskState:
         if self.expecting:
             строки.append(f"- ждём: {self.expecting}")
         if self.allowed:
-            куда = ", ".join(STAGE_LABELS[s] for s in self.allowed)
-            строки.append(f"- дальше возможно: {куда}")
+            if with_rights:
+                куски = []
+                for g in self.gates:
+                    если = "" if g["met"] else f" (заперто: нужно чтобы {g['guard']})"
+                    куски.append(f"{g['label']}{если}")
+                строки.append("- дальше возможно: " + ", ".join(куски))
+            else:
+                строки.append("- дальше возможно: "
+                              + ", ".join(STAGE_LABELS[s] for s in self.allowed))
         else:
             строки.append("- задача завершена")
         пройдено = [z for z in self.log if z.get("to")]
         if пройдено:
             путь = " → ".join(STAGE_LABELS.get(z["to"], z["to"]) for z in пройдено[-4:])
             строки.append(f"- уже пройдено: {путь}")
-        return "[Состояние задачи]\n" + "\n".join(строки)
+
+        # Права этапа — жёстким блоком, отдельно от справки о состоянии.
+        # Просто сказать «ты на этапе планирования» мало: модель воспримет
+        # это как контекст и всё равно выдаст код, если попросить.
+        права = self.rights if with_rights else {}
+        хвост = ""
+        if права:
+            хвост = ("\n\n[ЧТО РАЗРЕШЕНО НА ЭТОМ ЭТАПЕ]\n"
+                     f"Можно: {права.get('можно', '')}\n"
+                     f"НЕЛЬЗЯ: {права.get('нельзя', '')}\n"
+                     "Если просьба требует того, что на этом этапе нельзя — "
+                     "откажись, назови этап, объясни, какого условия не хватает, "
+                     "и предложи то, что на этом этапе уместно.")
+        return "[Состояние задачи]\n" + "\n".join(строки) + хвост
 
     def as_dict(self) -> dict:
         return {"stage": self.stage, "step": self.step, "expecting": self.expecting,
-                "goal": self.goal, "updated": self.updated, "log": self.log}
+                "goal": self.goal, "updated": self.updated, "log": self.log,
+                "approved": self.approved}
 
     @classmethod
     def from_dict(cls, raw: dict) -> "TaskState":
@@ -350,7 +456,8 @@ class TaskState:
                    expecting=str(raw.get("expecting", "")),
                    goal=str(raw.get("goal", "")),
                    updated=str(raw.get("updated", "")),
-                   log=list(raw.get("log") or []))
+                   log=list(raw.get("log") or []),
+                   approved=dict(raw.get("approved") or {}))
 
 
 @dataclass
@@ -962,6 +1069,9 @@ class SqliteStore(Store):
         updated   TEXT NOT NULL DEFAULT '',
         log       TEXT NOT NULL DEFAULT '[]'
     );
+    -- Отметки-условия (день 15) добавляются отдельно: базы дней 13-14 уже
+    -- созданы без этой колонки, а ALTER TABLE в executescript упал бы
+    -- на второй раз. Поэтому добавление вынесено в _migrate().
 
     CREATE TABLE IF NOT EXISTS profiles (
         name        TEXT PRIMARY KEY,
@@ -979,6 +1089,20 @@ class SqliteStore(Store):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.executescript(self.SCHEMA)
+            self._migrate(db)
+
+    @staticmethod
+    def _migrate(db) -> None:
+        """Досыпает колонки, появившиеся позже создания таблиц.
+
+        CREATE TABLE IF NOT EXISTS не добавляет колонки в уже существующую
+        таблицу, а ALTER TABLE ADD COLUMN падает, если колонка уже есть.
+        Поэтому смотрим, что реально лежит в базе, и добавляем недостающее.
+        """
+        колонки = {r[1] for r in db.execute("PRAGMA table_info(task_state)")}
+        if колонки and "approved" not in колонки:
+            db.execute("ALTER TABLE task_state ADD COLUMN approved TEXT "
+                       "NOT NULL DEFAULT '{}'")
 
     def __str__(self) -> str:
         return f"{self.label} · {self.path}"
@@ -1177,28 +1301,33 @@ class SqliteStore(Store):
         with self._connect() as db:
             db.execute(
                 "INSERT INTO task_state (session, stage, step, expecting, goal,"
-                " updated, log) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                " updated, log, approved) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(session) DO UPDATE SET stage = excluded.stage,"
                 "   step = excluded.step, expecting = excluded.expecting,"
                 "   goal = excluded.goal, updated = excluded.updated,"
-                "   log = excluded.log",
+                "   log = excluded.log, approved = excluded.approved",
                 (session, task.stage, task.step, task.expecting, task.goal,
-                 task.updated, json.dumps(task.log, ensure_ascii=False)),
+                 task.updated, json.dumps(task.log, ensure_ascii=False),
+                 json.dumps(task.approved, ensure_ascii=False)),
             )
 
     def load_task(self, session: str) -> TaskState | None:
         with self._connect() as db:
             row = db.execute(
-                "SELECT stage, step, expecting, goal, updated, log FROM task_state"
-                " WHERE session = ?", (session,)).fetchone()
+                "SELECT stage, step, expecting, goal, updated, log, approved"
+                " FROM task_state WHERE session = ?", (session,)).fetchone()
         if not row:
             return None
-        try:
-            журнал = json.loads(row[5] or "[]")
-        except json.JSONDecodeError:
-            журнал = []
+
+        def разобрать(сырое, пусто):
+            try:
+                return json.loads(сырое or пусто)
+            except json.JSONDecodeError:
+                return json.loads(пусто)
+
         return TaskState(stage=row[0], step=row[1], expecting=row[2], goal=row[3],
-                         updated=row[4], log=журнал)
+                         updated=row[4], log=разобрать(row[5], "[]"),
+                         approved=разобрать(row[6], "{}"))
 
     ПРОФИЛЬ_ПОЛЯ = ("name", "tone", "format", "level", "constraints",
                     "language", "extra")
@@ -1283,7 +1412,7 @@ def _safe_name(session: str) -> str:
 __all__ = ["Store", "JsonStore", "SqliteStore", "Turn", "SessionInfo", "Totals",
            "Summary", "Fact", "Memo", "Profile", "TaskState", "Invariant",
            "INVARIANT_SCOPES", "SCOPE_LABELS", "ARCH", "STACK", "RULE",
-           "STAGES", "TRANSITIONS", "STAGE_LABELS",
+           "STAGES", "TRANSITIONS", "STAGE_LABELS", "GUARDS", "STAGE_RIGHTS",
            "PLANNING", "EXECUTION", "VALIDATION", "DONE",
            "open_store", "default_dir", "now_iso",
            "local_time", "DEFAULT_SESSION", "ENV_DIR_VAR", "MemoryError_",

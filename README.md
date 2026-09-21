@@ -43,6 +43,7 @@
 | 12 | Персонализация | [days/day-12-personalization](days/day-12-personalization) | ✅ код готов, нужно видео |
 | 13 | Состояние задачи | [days/day-13-task-state](days/day-13-task-state) | ✅ код готов, нужно видео |
 | 14 | Инварианты | [days/day-14-invariants](days/day-14-invariants) | ✅ код готов, нужно видео |
+| 15 | Контролируемые переходы | [days/day-15-guarded-transitions](days/day-15-guarded-transitions) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 

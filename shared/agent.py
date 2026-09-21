@@ -26,10 +26,10 @@ from dataclasses import dataclass, field
 import json as _json
 
 from llm import LLMError, Provider, ask, ask_stream
-from memory import (DECISION, DEFAULT_SESSION, KNOWLEDGE, LONG, LONG_KINDS,
-                    PLANNING, PROFILE, SHORT, STAGE_LABELS, STAGES, WORKING,
-                    Fact, Invariant, Memo, Profile, Store, Summary, TaskState,
-                    Turn, now_iso)
+from memory import (DECISION, DEFAULT_SESSION, GUARDS, KNOWLEDGE, LONG,
+                    LONG_KINDS, PLANNING, PROFILE, SHORT, STAGE_LABELS, STAGES,
+                    WORKING, Fact, Invariant, Memo, Profile, Store, Summary,
+                    TaskState, Turn, now_iso)
 from tokens import cost, estimate_request, limit_of, money
 
 # Стратегии управления контекстом (день 10).
@@ -298,6 +298,13 @@ class Agent:
         self.task: TaskState | None = None
         self.tracking = False       # включает автослежение за этапом
 
+        # День 15: условия на рёбрах и права этапа. Выключены по умолчанию
+        # НАМЕРЕННО. День 13 — уже сданная работа с тем же автоматом, и если
+        # включить условия глобально, его переход «планирование → выполнение»
+        # окажется заперт навсегда: команды утверждения там нет. Новый
+        # механизм не должен ломать старый день.
+        self.guards = False
+
         # День 14: чего агенту нельзя. Инварианты живут вне сессий —
         # архитектура и стек одни на весь проект.
         self.invariants: list[Invariant] = []
@@ -534,7 +541,7 @@ class Agent:
         # Состояние задачи идёт перед памятью: для текущего ответа важнее
         # знать, на каком мы этапе, чем что обсуждали сорок реплик назад.
         if self.task:
-            куски.append(self.task.as_prompt())
+            куски.append(self.task.as_prompt(with_rights=self.guards))
         if self.summary and self.summary.content:
             куски.append("[Ранее в этом диалоге, сжатый пересказ]\n"
                          + self.summary.content)
@@ -928,13 +935,58 @@ class Agent:
             return False, (f"Из «{self.task.label}» нельзя сразу в "
                            f"«{STAGE_LABELS[to]}». Доступно: {куда}")
 
+        # День 15: ребро есть — но оно может быть заперто условием.
+        if self.guards:
+            заперто = self.task.blocked(to)
+            if заперто:
+                return False, (f"Переход «{self.task.label}» → "
+                               f"«{STAGE_LABELS[to]}» требует, чтобы {заперто}. "
+                               f"Отметка не поставлена.")
+
         откуда = self.task.stage
         self.task.stage = to
         self.task.updated = now_iso()
+
+        # Возврат назад снимает отметку на том ребре, куда мы возвращаемся:
+        # план будут переделывать, значит прежнее утверждение недействительно.
+        # Без этого можно было бы утвердить план один раз и потом бесконечно
+        # прыгать туда-сюда, обходя условие.
+        снято = ""
+        условие = GUARDS.get((to, откуда))
+        if условие and self.task.approved.pop(условие[0], None):
+            снято = f"; отметка «{условие[1]}» снята"
+
         self.task.log.append({"at": self.task.updated, "from": откуда, "to": to,
-                              "note": note.strip()})
+                              "note": (note.strip() + снято).strip("; ")})
         self._save_task()
-        return True, f"{STAGE_LABELS[откуда]} → {STAGE_LABELS[to]}"
+        return True, f"{STAGE_LABELS[откуда]} → {STAGE_LABELS[to]}{снято}"
+
+    def approve(self, key: str, *, by: str = "человек") -> tuple[bool, str]:
+        """Поставить отметку-условие: «план утверждён», «проверка пройдена».
+
+        Ставит именно человек. Если бы это мог сделать агент, условие ничего
+        не гарантировало бы: он утвердил бы собственный план и пошёл дальше.
+        """
+        if self.task is None:
+            return False, "Задача ещё не заведена"
+        известные = {k for k, _ in GUARDS.values()}
+        if key not in известные:
+            return False, f"Нет такого условия: {key!r}"
+        if self.task.is_met(key):
+            return False, "Отметка уже стоит"
+        self.task.approved[key] = now_iso()
+        подпись = next(п for k, п in GUARDS.values() if k == key)
+        self.task.log.append({"at": self.task.approved[key], "to": self.task.stage,
+                              "note": f"отмечено: {подпись} ({by})"})
+        self._save_task()
+        return True, f"Отмечено: {подпись}"
+
+    def revoke(self, key: str) -> bool:
+        """Снять отметку — например, если план переделали."""
+        if self.task is None or not self.task.approved.pop(key, None):
+            return False
+        self._save_task()
+        return True
 
     def update_task(self, *, step: str | None = None, expecting: str | None = None,
                     goal: str | None = None) -> None:
@@ -958,7 +1010,16 @@ class Agent:
         return {
             "stage": t.stage, "label": t.label, "step": t.step,
             "expecting": t.expecting, "goal": t.goal, "updated": t.updated,
-            "allowed": [{"stage": s, "label": STAGE_LABELS[s]} for s in t.allowed],
+            # Без guards все рёбра открыты: день 13 не знает про условия
+            # и не должен видеть замков.
+            "allowed": (t.gates if self.guards else
+                        [{"stage": s, "label": STAGE_LABELS[s], "guard": "",
+                          "key": "", "met": True} for s in t.allowed]),
+            "guards_on": self.guards,
+            "approved": dict(t.approved),
+            "rights": t.rights if self.guards else {},
+            "guards": [{"from": a, "to": b, "key": k, "label": п}
+                       for (a, b), (k, п) in GUARDS.items()],
             "stages": [{"stage": s, "label": STAGE_LABELS[s],
                         "passed": any(z.get("to") == s for z in t.log),
                         "current": s == t.stage} for s in STAGES],
