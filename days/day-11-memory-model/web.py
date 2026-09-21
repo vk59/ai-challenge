@@ -53,9 +53,23 @@ class Handler(BaseHTTPRequestHandler):
         route = urlsplit(self.path).path
 
         if route == "/reset":
-            # Стираем диалог и рабочую память. Долговременная остаётся —
-            # в этом и весь смысл слоя, и это видно прямо в окне.
+            # СТИРАЕТ текущий диалог вместе с рабочей памятью. Долговременная
+            # остаётся. Это не то же самое, что «начать новый диалог», —
+            # см. /session ниже.
             AGENT.reset()
+            self._send_json(200, self._state())
+            return
+
+        if route == "/session":
+            # Переключение на другой диалог. Именно это, а не /reset, даёт
+            # честную проверку слоёв: старый диалог остаётся на диске целым,
+            # краткосрочная и рабочая память берутся из нового, а
+            # долговременная переезжает — она вне сессий.
+            payload = self._payload()
+            if payload is None:
+                return
+            имя = str(payload.get("session", "")).strip() or DEFAULT_SESSION
+            AGENT.switch(имя)
             self._send_json(200, self._state())
             return
 
@@ -136,6 +150,9 @@ class Handler(BaseHTTPRequestHandler):
             "name": AGENT.name,
             "model": AGENT.model,
             "session": AGENT.session,
+            "sessions": [
+                {"name": i.name, "pairs": i.pairs} for i in AGENT.store.sessions()
+            ] if AGENT.store else [],
             "layers": AGENT.layers(),
             "turns": s.turns,
             "tokens": s.total_tokens,

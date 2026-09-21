@@ -188,7 +188,9 @@
   <header class="titlebar">
     <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
     <div class="titles"><b>Модель памяти агента</b><span id="subtitle">День 11</span></div>
+    <select class="btn" id="sessions" title="Диалоги"></select>
     <button class="btn" id="newChat">Новый диалог</button>
+    <button class="btn" id="eraseChat" title="Стереть этот диалог">Стереть</button>
   </header>
 
   <div class="body">
@@ -240,7 +242,11 @@
     <span>всего <b id="tokens">0</b></span>
     <span>служебных <b id="overhead">0</b></span>
     <span>потрачено <b id="spent">—</b></span>
-    <span class="native-actions"><button class="btn" id="newChatNative">Новый диалог</button></span>
+    <span class="native-actions">
+      <select class="btn" id="sessionsNative" title="Диалоги"></select>
+      <button class="btn" id="newChatNative">Новый диалог</button>
+      <button class="btn" id="eraseNative">Стереть</button>
+    </span>
   </div>
 </div>
 
@@ -358,6 +364,7 @@ function apply(next){
   $('#overhead').textContent=(state.overhead||0).toLocaleString('ru');
   $('#spent').textContent=state.spent||'—';
   if(state.weigh) $('#weigh').textContent=(state.weigh.total||0).toLocaleString('ru');
+  fillSessions();
   renderLayers();
 }
 
@@ -422,10 +429,44 @@ async function post(url,body){
   return d;
 }
 
+/* «Новый диалог» СОЗДАЁТ новую сессию, а не стирает текущую. Это и есть
+   честная проверка слоёв: старый диалог остаётся на диске, краткосрочная
+   и рабочая память пустые, а долговременная переезжает. */
 async function newConversation(){
+  const занятые=new Set((state.sessions||[]).map(s=>s.name));
+  let n=занятые.size+1, имя='диалог-'+n;
+  while(занятые.has(имя)) имя='диалог-'+(++n);
+  const d=await post('/session',{session:имя});
+  if(!d) return;
+  apply(d); renderHistory(d.history); sync(); promptEl.focus();
+}
+
+/* А «Стереть» — стирает по-настоящему, но только этот диалог.
+   Долговременная память и тут остаётся: её чистят крестиками. */
+async function eraseConversation(){
   const d=await post('/reset');
   if(!d) return;
   apply(d); renderHistory(d.history); sync(); promptEl.focus();
+}
+
+async function openSession(имя){
+  const d=await post('/session',{session:имя});
+  if(!d) return;
+  apply(d); renderHistory(d.history); sync(); promptEl.focus();
+}
+
+function fillSessions(){
+  const список=(state.sessions||[]).map(s=>s.name);
+  if(!список.includes(state.session)) список.unshift(state.session);
+  for(const el of [$('#sessions'),$('#sessionsNative')]){
+    if(!el) continue;
+    el.replaceChildren(...список.map(имя=>{
+      const info=(state.sessions||[]).find(s=>s.name===имя);
+      const o=document.createElement('option');
+      o.value=имя; o.textContent=info?`${имя} (${info.pairs})`:имя;
+      o.selected=имя===state.session; return o;
+    }));
+  }
 }
 async function forget(key){ const d=await post('/forget',{key}); if(d) apply(d); }
 window.newConversation=newConversation;
@@ -440,6 +481,10 @@ promptEl.addEventListener('keydown',e=>{
 sendEl.addEventListener('click',send);
 $('#newChat').addEventListener('click',newConversation);
 $('#newChatNative').addEventListener('click',newConversation);
+$('#eraseChat').addEventListener('click',eraseConversation);
+$('#eraseNative').addEventListener('click',eraseConversation);
+$('#sessions').addEventListener('change',e=>openSession(e.target.value));
+$('#sessionsNative').addEventListener('change',e=>openSession(e.target.value));
 
 $('#wAdd').addEventListener('click',async()=>{
   const k=$('#wKey').value.trim(), v=$('#wVal').value.trim();
