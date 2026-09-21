@@ -219,6 +219,51 @@ class Memo:
                    source=str(raw.get("source", "")))
 
 
+# Области инвариантов (день 14) — для группировки в интерфейсе.
+ARCH, STACK, RULE, DECISION_KIND = "arch", "stack", "rule", "decision"
+INVARIANT_SCOPES = (ARCH, STACK, RULE, DECISION_KIND)
+SCOPE_LABELS = {ARCH: "архитектура", STACK: "стек", RULE: "бизнес-правило",
+                DECISION_KIND: "принятое решение"}
+
+
+@dataclass
+class Invariant:
+    """Ограничение, которое ассистент не имеет права нарушать (день 14).
+
+    Отличие от долговременной памяти принципиальное. Память — это то, что
+    агент ЗНАЕТ («база PostgreSQL 16»). Инвариант — то, чего ему НЕЛЬЗЯ
+    («предлагать замену СУБД запрещено»). Первое он может учесть или забыть,
+    второе обязан соблюдать и обязан отказать, если его просят нарушить.
+
+    Поэтому у инварианта есть rationale: отказ без причины выглядит
+    самодурством, а с причиной — это разговор по существу.
+    """
+
+    id: int = 0
+    text: str = ""           # само ограничение, повелительно
+    rationale: str = ""      # почему так решили
+    scope: str = STACK
+    active: bool = True
+    at: str = ""
+
+    @property
+    def scope_label(self) -> str:
+        return SCOPE_LABELS.get(self.scope, self.scope)
+
+    def as_dict(self) -> dict:
+        return {"id": self.id, "text": self.text, "rationale": self.rationale,
+                "scope": self.scope, "active": self.active, "at": self.at,
+                "scope_label": self.scope_label}
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Invariant":
+        return cls(id=int(raw.get("id", 0) or 0), text=str(raw.get("text", "")),
+                   rationale=str(raw.get("rationale", "")),
+                   scope=str(raw.get("scope", STACK)),
+                   active=bool(raw.get("active", True)),
+                   at=str(raw.get("at", "")))
+
+
 # Состояние задачи как конечный автомат (день 13).
 #
 # Этапы и — что важнее — РЁБРА между ними. Без рёбер это был бы просто
@@ -450,6 +495,17 @@ class Store:
         """Забыть одну запись навсегда. True — если было что забывать."""
         raise NotImplementedError
 
+    # ── инварианты (день 14) ────────────────────────────────────────────
+    def save_invariant(self, inv: Invariant) -> Invariant:
+        """Создать или обновить ограничение. Вернуть с проставленным id."""
+        raise NotImplementedError
+
+    def invariants(self, *, only_active: bool = False) -> list[Invariant]:
+        raise NotImplementedError
+
+    def delete_invariant(self, inv_id: int) -> bool:
+        raise NotImplementedError
+
     # ── состояние задачи (день 13) ──────────────────────────────────────
     def save_task(self, session: str, task: TaskState) -> None:
         """Состояние задачи привязано к чату: чат и есть задача."""
@@ -670,6 +726,58 @@ class JsonStore(Store):
             self._write_long(осталось)
             return True
 
+    # Инварианты — вне сессий, как и долговременная память: архитектура
+    # и стек одни на весь проект, а не на отдельный чат.
+    def _inv_path(self) -> Path:
+        return self.dir / "_invariants.json"
+
+    def save_invariant(self, inv: Invariant) -> Invariant:
+        with self._lock:
+            все = self._read_invariants()
+            if inv.id:
+                все = [inv if x.id == inv.id else x for x in все]
+            else:
+                inv.id = max((x.id for x in все), default=0) + 1
+                все.append(inv)
+            self._write_invariants(все)
+            return inv
+
+    def invariants(self, *, only_active: bool = False) -> list[Invariant]:
+        найдено = self._read_invariants()
+        if only_active:
+            найдено = [x for x in найдено if x.active]
+        return sorted(найдено, key=lambda x: x.id)
+
+    def delete_invariant(self, inv_id: int) -> bool:
+        with self._lock:
+            все = self._read_invariants()
+            осталось = [x for x in все if x.id != inv_id]
+            if len(осталось) == len(все):
+                return False
+            self._write_invariants(осталось)
+            return True
+
+    def _read_invariants(self) -> list[Invariant]:
+        try:
+            raw = json.loads(self._inv_path().read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return []
+        except (json.JSONDecodeError, OSError) as exc:
+            raise MemoryError_(f"Инварианты повреждены: {exc}") from exc
+        return [Invariant.from_dict(r) for r in raw.get("invariants") or []]
+
+    def _write_invariants(self, список: list[Invariant]) -> None:
+        путь = self._inv_path()
+        tmp = путь.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps(
+                {"invariants": [x.as_dict() for x in список]},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, путь)
+        except OSError as exc:
+            tmp.unlink(missing_ok=True)
+            raise MemoryError_(f"Не пишутся инварианты: {exc}") from exc
+
     def _profiles_path(self) -> Path:
         return self.dir / "_profiles.json"
 
@@ -831,6 +939,17 @@ class SqliteStore(Store):
     -- Профили пользователя (день 12): не факты О человеке, а указания,
     -- КАК с ним говорить. Тоже вне сессий, и их может быть несколько —
     -- иначе не сравнить, как один вопрос звучит для новичка и для senior.
+    -- Инварианты (день 14). Колонки session тут НЕТ: архитектура, стек
+    -- и бизнес-правила одни на весь проект, а не на отдельный чат.
+    CREATE TABLE IF NOT EXISTS invariants (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        text      TEXT    NOT NULL,
+        rationale TEXT    NOT NULL DEFAULT '',
+        scope     TEXT    NOT NULL DEFAULT 'stack',
+        active    INTEGER NOT NULL DEFAULT 1,
+        at        TEXT    NOT NULL DEFAULT ''
+    );
+
     -- Состояние задачи (день 13). По одному на чат: чат и есть задача.
     -- Лежит отдельно от реплик, поэтому переживает и вытеснение окна,
     -- и перезапуск — на этом держится «пауза и продолжение».
@@ -1025,6 +1144,35 @@ class SqliteStore(Store):
             cur = db.execute("DELETE FROM longterm WHERE key = ?", (key,))
             return cur.rowcount > 0
 
+    def save_invariant(self, inv: Invariant) -> Invariant:
+        with self._connect() as db:
+            if inv.id:
+                db.execute(
+                    "UPDATE invariants SET text = ?, rationale = ?, scope = ?,"
+                    " active = ?, at = ? WHERE id = ?",
+                    (inv.text, inv.rationale, inv.scope, int(inv.active),
+                     inv.at, inv.id))
+            else:
+                cur = db.execute(
+                    "INSERT INTO invariants (text, rationale, scope, active, at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (inv.text, inv.rationale, inv.scope, int(inv.active), inv.at))
+                inv.id = int(cur.lastrowid)
+        return inv
+
+    def invariants(self, *, only_active: bool = False) -> list[Invariant]:
+        запрос = ("SELECT id, text, rationale, scope, active, at FROM invariants"
+                  + (" WHERE active = 1" if only_active else "") + " ORDER BY id")
+        with self._connect() as db:
+            rows = db.execute(запрос).fetchall()
+        return [Invariant(id=r[0], text=r[1], rationale=r[2], scope=r[3],
+                          active=bool(r[4]), at=r[5]) for r in rows]
+
+    def delete_invariant(self, inv_id: int) -> bool:
+        with self._connect() as db:
+            return db.execute("DELETE FROM invariants WHERE id = ?",
+                              (inv_id,)).rowcount > 0
+
     def save_task(self, session: str, task: TaskState) -> None:
         with self._connect() as db:
             db.execute(
@@ -1133,7 +1281,8 @@ def _safe_name(session: str) -> str:
 
 
 __all__ = ["Store", "JsonStore", "SqliteStore", "Turn", "SessionInfo", "Totals",
-           "Summary", "Fact", "Memo", "Profile", "TaskState",
+           "Summary", "Fact", "Memo", "Profile", "TaskState", "Invariant",
+           "INVARIANT_SCOPES", "SCOPE_LABELS", "ARCH", "STACK", "RULE",
            "STAGES", "TRANSITIONS", "STAGE_LABELS",
            "PLANNING", "EXECUTION", "VALIDATION", "DONE",
            "open_store", "default_dir", "now_iso",

@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Инварианты проекта</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --bubble:#e9e9eb;--field:#fff;--border:rgba(0,0,0,.12);
+    --hairline:rgba(0,0,0,.08);--accent:#007aff;--code-bg:rgba(0,0,0,.05);
+    --danger:#d70015;--danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--ok-bg:rgba(52,199,89,.12);
+    --inv:#ff375f;--stage:#5e5ce6;--short:#ff9f0a;--working:#30b0c7;--long:#bf5af2;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --bubble:#3a3a3c;--field:#2c2c2e;--border:rgba(255,255,255,.14);
+    --hairline:rgba(255,255,255,.10);--accent:#0a84ff;--code-bg:rgba(255,255,255,.07);
+    --danger:#ff6961;--danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--ok-bg:rgba(48,209,88,.14);
+    --inv:#ff6482;--stage:#7d7aff;--short:#ffb340;--working:#40c8e0;--long:#da8fff;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:22px 16px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1180px);height:min(100%,780px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:23px;padding:0 10px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn:active:not(:disabled){background:var(--bubble)}
+
+  .body{flex:1;min-height:0;display:flex}
+  .chats{flex:none;width:186px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column}
+  .chats header{flex:none;display:flex;align-items:center;padding:9px 10px 7px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .chats header button{margin-left:auto;width:22px;height:22px;display:grid;
+    place-items:center;font-size:15px;line-height:1;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;padding:0}
+  .chatlist{flex:1;min-height:0;overflow-y:auto;padding:0 7px 9px;
+    display:flex;flex-direction:column;gap:2px}
+  .chat{display:flex;align-items:center;gap:5px;padding:6px 8px;border-radius:7px;
+    cursor:pointer;border:.5px solid transparent}
+  .chat:hover{background:var(--field)}
+  .chat.active{background:var(--field);border-color:var(--border)}
+  .chat .info{flex:1;min-width:0}
+  .chat .t{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chat.active .t{font-weight:600}
+  .chat .s{font-size:10px;color:var(--muted)}
+  .chat .x{flex:none;opacity:0;color:var(--muted);font-size:12px;padding:0 2px}
+  .chat:hover .x{opacity:.55}
+  .chat .x:hover{opacity:1;color:var(--danger)}
+
+  .chat-area{flex:1;min-width:0;display:flex;flex-direction:column}
+  .transcript{flex:1;min-height:0;overflow-y:auto;padding:17px;
+    display:flex;flex-direction:column;gap:11px}
+  .msg{display:flex;flex-direction:column}
+  .msg.me{align-items:flex-end}.msg.bot{align-items:flex-start}
+  .bubble{max-width:84%;padding:8px 13px;border-radius:17px;overflow-wrap:anywhere}
+  .me .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:5px;
+    white-space:pre-wrap}
+  .bot .bubble{background:var(--bubble);border-bottom-left-radius:5px}
+  .bot .bubble.error{background:var(--danger-bg);color:var(--danger)}
+  .bubble p{margin:.5em 0}.bubble>:first-child{margin-top:0}
+  .bubble>:last-child{margin-bottom:0}
+  .bubble ul,.bubble ol{margin:.5em 0;padding-left:1.3em}
+  .bubble code{font:12px/1.4 ui-monospace,"SF Mono",Menlo,monospace;
+    background:var(--code-bg);padding:.1em .3em;border-radius:4px}
+  .bubble pre{margin:.5em 0;padding:9px 11px;background:var(--code-bg);
+    border-radius:8px;overflow-x:auto}
+  .bubble pre code{background:none;padding:0}
+  .streaming::after{content:'';display:inline-block;vertical-align:-2px;width:7px;
+    height:14px;margin-left:2px;background:currentColor;border-radius:1px;
+    animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .dots{display:flex;gap:4px;padding:4px 1px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+
+  /* ── вердикт проверки: главное в этом дне ──────────────────────── */
+  .verdict{margin:5px 6px 0;font-size:11.5px;padding:6px 10px;border-radius:8px;
+    max-width:84%;display:flex;gap:7px;align-items:flex-start}
+  .verdict.ok{background:var(--ok-bg);color:var(--ok)}
+  .verdict.bad{background:var(--danger-bg);color:var(--danger)}
+  .verdict.wait{background:var(--code-bg);color:var(--muted)}
+  .verdict .ic{flex:none;font-weight:700}
+  .verdict b{display:block;font-weight:650}
+  .verdict q{display:block;color:var(--text);opacity:.75;margin-top:3px;
+    font-style:italic}
+
+  .empty{margin:auto;text-align:center;max-width:450px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:13px}
+  .chip{font:inherit;font-size:12px;color:var(--text);background:var(--field);
+    border:.5px solid var(--border);border-radius:13px;padding:4px 11px;cursor:pointer}
+  .chip:hover{background:var(--bubble)}
+  .composer{flex:none;display:flex;align-items:flex-end;gap:8px;padding:10px 12px;
+    background:var(--chrome);border-top:.5px solid var(--hairline)}
+  .composer textarea{flex:1;resize:none;max-height:118px;padding:7px 12px;font:inherit;
+    color:var(--text);background:var(--field);border:.5px solid var(--border);
+    border-radius:16px;outline:none}
+  .composer textarea:focus{border-color:var(--accent);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 28%,transparent)}
+  .send{flex:none;width:30px;height:30px;display:grid;place-items:center;font-size:15px;
+    color:#fff;background:var(--accent);border:0;border-radius:50%;cursor:pointer}
+  .send:disabled{background:var(--bubble);color:var(--muted);cursor:default}
+
+  .side{flex:none;width:320px;border-left:.5px solid var(--hairline);
+    background:var(--chrome);display:flex;flex-direction:column;overflow-y:auto}
+  .layer{border-bottom:.5px solid var(--hairline);padding:10px 12px}
+  .layer h3{margin:0 0 2px;font-size:11.5px;font-weight:650;display:flex;
+    align-items:center;gap:6px}
+  .layer h3 .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .layer.inv h3 .dot{background:var(--inv)}
+  .layer.task h3 .dot{background:var(--stage)}
+  .layer.mem h3 .dot{background:var(--long)}
+  .layer .scope{font-size:10.5px;color:var(--muted);margin:0 0 7px 14px}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px}
+
+  .inv{display:flex;gap:7px;align-items:flex-start;padding:7px 9px;
+    background:var(--field);border:.5px solid var(--border);border-radius:7px;
+    margin-bottom:5px;font-size:11.5px}
+  .inv.off{opacity:.45}
+  .inv .sw{flex:none;width:30px;height:17px;border-radius:9px;background:var(--bubble);
+    position:relative;cursor:pointer;transition:background .15s;margin-top:1px}
+  .inv.on .sw{background:var(--inv)}
+  .inv .sw::after{content:'';position:absolute;top:2px;left:2px;width:13px;height:13px;
+    border-radius:50%;background:#fff;transition:transform .15s}
+  .inv.on .sw::after{transform:translateX(13px)}
+  .inv .body{flex:1;min-width:0}
+  .inv .num{font-weight:700;color:var(--inv)}
+  .inv .sc{font-size:9.5px;text-transform:uppercase;letter-spacing:.03em;
+    color:var(--muted)}
+  .inv .why{font-size:10.5px;color:var(--muted);margin-top:2px}
+  .inv .x{flex:none;cursor:pointer;color:var(--muted);opacity:.5}
+  .inv .x:hover{opacity:1;color:var(--danger)}
+  .addrow{display:flex;gap:4px;margin-top:6px}
+  .addrow input,.addrow select{flex:1;min-width:0;font:inherit;font-size:11px;
+    padding:4px 6px;background:var(--field);border:.5px solid var(--border);
+    border-radius:5px;color:var(--text);outline:none}
+  .addrow button{flex:none;font:inherit;font-size:11px;padding:3px 9px;
+    background:var(--field);border:.5px solid var(--border);border-radius:5px;
+    color:var(--text);cursor:pointer}
+  .stages{display:flex;gap:4px;flex-wrap:wrap;font-size:10.5px}
+  .stages span{padding:2px 7px;border-radius:10px;background:var(--field);
+    border:.5px solid var(--border);color:var(--muted)}
+  .stages span.cur{background:var(--stage);color:#fff;border-color:transparent}
+  .item{font-size:11.5px;background:var(--field);border:.5px solid var(--border);
+    border-radius:6px;padding:5px 8px;display:flex;gap:6px;margin-bottom:4px}
+  .item .k{font-weight:600;flex:none;max-width:45%;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .item .v{color:var(--muted);flex:1;min-width:0;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .statusbar .native-actions{display:none;margin-left:auto;gap:6px}
+  .native .statusbar .native-actions{display:flex}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1040px){.side{width:270px}.chats{width:160px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b id="chatTitle">Инварианты</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="chats">
+      <header>Чаты <button id="newChatBtn" title="Новый чат">+</button></header>
+      <div class="chatlist" id="chatList"></div>
+    </nav>
+
+    <div class="chat-area">
+      <div class="transcript" id="transcript"></div>
+      <footer class="composer">
+        <textarea id="prompt" rows="1" placeholder="Сообщение…" autofocus></textarea>
+        <button class="send" id="send" disabled title="Отправить (Enter)">↑</button>
+      </footer>
+    </div>
+
+    <aside class="side">
+      <section class="layer inv">
+        <h3><span class="dot"></span>Ограничения проекта</h3>
+        <p class="scope">нарушать нельзя · уезжают в <b>каждый</b> запрос</p>
+        <div id="invList"></div>
+        <div class="addrow"><input id="iText" placeholder="что нельзя"></div>
+        <div class="addrow"><input id="iWhy" placeholder="почему (необязательно)"></div>
+        <div class="addrow">
+          <select id="iScope"></select>
+          <button id="iAdd">Добавить</button>
+        </div>
+      </section>
+
+      <section class="layer task">
+        <h3><span class="dot"></span>Состояние задачи</h3>
+        <div class="stages" id="stages"></div>
+      </section>
+
+      <section class="layer mem">
+        <h3><span class="dot"></span>Память</h3>
+        <div id="memItems"></div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span>модель <b id="model">—</b></span>
+    <span>запрос <b id="weigh">0</b></span>
+    <span>из них ограничения <b id="winv">0</b></span>
+    <span>всего <b id="tokens">0</b></span>
+    <span>потрачено <b id="spent">—</b></span>
+    <span class="native-actions"><button class="btn" id="newChatNative">Новый чат</button></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">⛔</div>
+    <h2>Ограничения проекта</h2>
+    <p>Справа — то, что агент не имеет права нарушать. Попросите его
+       нарушить — он откажется и объяснит чем. Под каждым ответом видно,
+       прошла ли проверка.</p>
+    <div class="chips">
+      <button class="chip">Давай перейдём на MongoDB, она быстрее</button>
+      <button class="chip">Вынесем оплату в отдельный микросервис</button>
+      <button class="chip">Как ускорить выборку по каталогу?</button>
+    </div>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const transcript=$('#transcript'),promptEl=$('#prompt'),sendEl=$('#send');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+function md(src){
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  if(((src.match(/```/g)||[]).length)%2) src+='\n```';
+  const blocks=[];
+  src=src.replace(/```[a-zA-Z0-9+#.-]*\n?([\s\S]*?)```/g,(_,b)=>{
+    blocks.push('<pre><code>'+esc(b.replace(/\n+$/,''))+'</code></pre>');
+    return '\n@@C'+(blocks.length-1)+'@@\n';});
+  const inl=s=>esc(s).replace(/`([^`\n]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
+  const out=[];let list=null;
+  const close=()=>{if(list){out.push('</'+list+'>');list=null;}};
+  for(const raw of src.split('\n')){
+    const l=raw.trim();const p=l.match(/^@@C(\d+)@@$/);
+    if(p){close();out.push(blocks[+p[1]]);continue;}
+    if(!l){close();continue;}
+    const b=l.match(/^[-*•]\s+(.*)$/),n=l.match(/^\d+[.)]\s+(.*)$/);
+    if(b||n){const w=b?'ul':'ol';if(list!==w){close();out.push('<'+w+'>');list=w;}
+      out.push('<li>'+inl((b||n)[1])+'</li>');continue;}
+    close();out.push('<p>'+inl(l)+'</p>');
+  }
+  close();return out.join('');
+}
+function showEmpty(){transcript.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function addMsg(who){
+  const e=$('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className='msg '+who;
+  d.innerHTML='<div class="bubble"></div>';transcript.append(d);
+  return d.firstElementChild;
+}
+const scroll=()=>transcript.scrollTo({top:transcript.scrollHeight,behavior:'smooth'});
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body||{})});
+  const d=await r.json();
+  if(d.error){alert(d.error);return null;}
+  return d;
+}
+
+/* ── ограничения ────────────────────────────────────────────────── */
+function renderInvariants(){
+  const box=$('#invList');box.replaceChildren();
+  const список=state.invariants||[];
+  if(!список.length){
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'ограничений нет — агент ничем не связан'}));
+    return;
+  }
+  for(const i of список){
+    const d=document.createElement('div');
+    d.className='inv '+(i.active?'on':'off');
+    d.innerHTML='<span class="sw"></span><div class="body">'
+      +'<div><span class="num"></span> <span class="sc"></span></div>'
+      +'<div class="txt"></div><div class="why"></div></div><span class="x">✕</span>';
+    d.querySelector('.num').textContent=i.id+'.';
+    d.querySelector('.sc').textContent=i.scope_label||'';
+    d.querySelector('.txt').textContent=i.text;
+    const why=d.querySelector('.why');
+    if(i.rationale)why.textContent='почему: '+i.rationale; else why.remove();
+    d.querySelector('.sw').onclick=async()=>{
+      const r=await post('/inv/toggle',{id:i.id,active:!i.active});if(r)apply(r);};
+    d.querySelector('.x').onclick=async()=>{
+      if(!confirm('Удалить ограничение '+i.id+'?'))return;
+      const r=await post('/inv/delete',{id:i.id});if(r)apply(r);};
+    box.append(d);
+  }
+  const живых=список.filter(i=>i.active).length;
+  const подпись=document.createElement('div');
+  подпись.className='nothing';
+  подпись.textContent='действует '+живых+' из '+список.length;
+  box.append(подпись);
+}
+
+function renderScopes(){
+  const sel=$('#iScope');
+  if(sel.options.length)return;
+  for(const s of state.scopes||[]){
+    const o=document.createElement('option');
+    o.value=s.scope;o.textContent=s.label;sel.append(o);
+  }
+}
+
+/* ── вердикт проверки ───────────────────────────────────────────── */
+function verdict(el,данные,ждём){
+  const d=document.createElement('div');
+  if(ждём){
+    d.className='verdict wait';
+    d.innerHTML='<span class="ic">…</span><div>проверяю ответ на нарушения</div>';
+    el.parentElement.append(d);return d;
+  }
+  if(!данные||!данные.checked){d.remove();return null;}
+  if(данные.error){
+    d.className='verdict wait';
+    d.innerHTML='<span class="ic">?</span><div></div>';
+    d.querySelector('div').textContent='проверить не удалось: '+данные.error;
+  }else if(данные.ok){
+    d.className='verdict ok';
+    d.innerHTML='<span class="ic">✓</span><div></div>';
+    d.querySelector('div').textContent='проверено ограничений: '+данные.checked
+      +' — нарушений нет';
+  }else{
+    d.className='verdict bad';
+    const n=данные.violations[0]||{};
+    d.innerHTML='<span class="ic">⚠</span><div><b></b><q></q></div>';
+    d.querySelector('b').textContent='нарушено ограничение '+n.id+': '+(n.text||'');
+    const q=d.querySelector('q');
+    if(n.quote)q.textContent='«'+n.quote+'»'; else q.remove();
+  }
+  el.parentElement.append(d);
+  return d;
+}
+
+/* ── чаты, задача, память ───────────────────────────────────────── */
+function renderChats(){
+  const list=$('#chatList');list.replaceChildren();
+  for(const c of state.chats||[]){
+    const d=document.createElement('div');
+    d.className='chat'+(c.active?' active':'');
+    d.innerHTML='<div class="info"><div class="t"></div><div class="s"></div></div>'
+               +'<span class="x">✕</span>';
+    d.querySelector('.t').textContent=c.title||c.name;
+    d.querySelector('.s').textContent=(c.pairs||0)+' пар';
+    d.onclick=e=>{if(!e.target.classList.contains('x'))openChat(c.name);};
+    d.querySelector('.x').onclick=async e=>{
+      e.stopPropagation();
+      if(!confirm('Удалить чат «'+(c.title||c.name)+'»?'))return;
+      const r=await post('/chat/delete',{session:c.name});
+      if(r){apply(r);renderHistory(r.history);}};
+    list.append(d);
+  }
+}
+async function openChat(имя){
+  const d=await post('/session',{session:имя});
+  if(!d)return;apply(d);renderHistory(d.history);sync();promptEl.focus();
+}
+async function newChat(){
+  const занятые=new Set((state.chats||[]).map(c=>c.name));
+  let n=занятые.size+1,имя='чат-'+n;
+  while(занятые.has(имя))имя='чат-'+(++n);
+  await openChat(имя);
+}
+window.newChat=newChat;
+
+function renderTask(){
+  const box=$('#stages');box.replaceChildren();
+  const t=state.task;
+  if(!t){box.append(Object.assign(document.createElement('div'),
+    {className:'nothing',textContent:'задача не заведена'}));return;}
+  for(const s of t.stages){
+    const el=document.createElement('span');
+    el.className=s.current?'cur':'';el.textContent=s.label;box.append(el);
+  }
+}
+function renderMem(){
+  const box=$('#memItems');box.replaceChildren();
+  const l=(state.layers||{}).long||{};
+  if(!(l.items||[]).length){box.append(Object.assign(document.createElement('div'),
+    {className:'nothing',textContent:'пусто'}));return;}
+  for(const it of (l.items||[]).slice(0,6)){
+    const d=document.createElement('div');d.className='item';
+    d.innerHTML='<span class="k"></span><span class="v"></span>';
+    d.firstElementChild.textContent=it.key;d.children[1].textContent=it.value;
+    box.append(d);
+  }
+}
+
+function apply(next){
+  if(!next)return;
+  state={...state,...next};
+  $('#model').textContent=state.model||'—';
+  const чат=(state.chats||[]).find(c=>c.active);
+  $('#chatTitle').textContent=чат?(чат.title||чат.name):'Инварианты';
+  const живых=(state.invariants||[]).filter(i=>i.active).length;
+  $('#subtitle').textContent='ограничений: '+живых+' · '+(state.model||'');
+  $('#tokens').textContent=(state.tokens||0).toLocaleString('ru');
+  $('#spent').textContent=state.spent||'—';
+  if(state.weigh){
+    $('#weigh').textContent=(state.weigh.total||0).toLocaleString('ru');
+    $('#winv').textContent=(state.weigh.invariants||0).toLocaleString('ru');
+  }
+  renderScopes();renderInvariants();renderChats();renderTask();renderMem();
+}
+function renderHistory(h){
+  transcript.replaceChildren();
+  if(!h||!h.length){showEmpty();return;}
+  for(const t of h){
+    const b=addMsg(t.role==='user'?'me':'bot');
+    if(t.role==='user')b.textContent=t.content;else b.innerHTML=md(t.content);
+  }
+  transcript.scrollTop=transcript.scrollHeight;
+}
+
+async function send(){
+  const message=promptEl.value.trim();
+  if(!message||busy)return;
+  busy=true;promptEl.value='';grow();sync();
+  addMsg('me').textContent=message;
+  const b=addMsg('bot');b.innerHTML='<div class="dots"><i></i><i></i><i></i></div>';
+  scroll();
+  let text='',ожидание=null;
+  try{
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const {value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error)throw new Error(m.error);
+        if(m.delta){text+=m.delta;b.classList.add('streaming');
+          b.innerHTML=md(text);scroll();}
+        if(m.auditing){b.classList.remove('streaming');
+          ожидание=verdict(b,null,true);scroll();}
+        if(m.done){
+          if(ожидание)ожидание.remove();
+          apply(m);verdict(b,m.audit,false);scroll();
+        }
+      }
+    }
+    b.classList.remove('streaming');
+  }catch(err){
+    b.classList.remove('streaming');b.classList.add('error');
+    b.textContent=String(err.message||err);
+  }finally{busy=false;sync();scroll();promptEl.focus();}
+}
+
+function sync(){sendEl.disabled=busy||!promptEl.value.trim();}
+function grow(){promptEl.style.height='auto';
+  promptEl.style.height=promptEl.scrollHeight+'px';}
+promptEl.addEventListener('input',()=>{grow();sync();});
+promptEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+sendEl.addEventListener('click',send);
+$('#newChatBtn').addEventListener('click',newChat);
+$('#newChatNative').addEventListener('click',newChat);
+$('#iAdd').addEventListener('click',async()=>{
+  const t=$('#iText').value.trim();
+  if(!t){alert('Напишите, что нельзя');return;}
+  const d=await post('/inv/add',{text:t,rationale:$('#iWhy').value,
+    scope:$('#iScope').value});
+  if(d){$('#iText').value='';$('#iWhy').value='';apply(d);}});
+transcript.addEventListener('click',e=>{
+  const c=e.target.closest('.chip');if(!c)return;
+  promptEl.value=c.textContent;grow();send();});
+
+fetch('/state').then(r=>r.json())
+  .then(d=>{apply(d);renderHistory(d.history);})
+  .catch(()=>showEmpty());
+</script>
+</body>
+</html>

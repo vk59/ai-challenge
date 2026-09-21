@@ -28,7 +28,8 @@ import json as _json
 from llm import LLMError, Provider, ask, ask_stream
 from memory import (DECISION, DEFAULT_SESSION, KNOWLEDGE, LONG, LONG_KINDS,
                     PLANNING, PROFILE, SHORT, STAGE_LABELS, STAGES, WORKING,
-                    Fact, Memo, Profile, Store, Summary, TaskState, Turn, now_iso)
+                    Fact, Invariant, Memo, Profile, Store, Summary, TaskState,
+                    Turn, now_iso)
 from tokens import cost, estimate_request, limit_of, money
 
 # Стратегии управления контекстом (день 10).
@@ -58,6 +59,28 @@ FACTS_MAX_TOKENS = 1500
 # НЕТ: права переводить этап куда вздумается. Модель лишь предлагает,
 # а допустим ли переход — решает автомат в TRANSITIONS. Иначе «конечный
 # автомат» выродился бы в ярлык, который модель меняет как хочет.
+# День 14: аудит ответа на нарушение инвариантов.
+#
+# Зачем он нужен, если инварианты уже в системном промпте. Затем, что блок
+# в промпте — это просьба, а не гарантия: модель может его не выполнить,
+# и без проверки мы об этом не узнаем. Аудит превращает «ассистент должен
+# соблюдать» в «видно, соблюдает ли».
+#
+# Проверяющий намеренно не видит системного промпта с инвариантами в том же
+# виде — ему даются только текст ограничений и ответ. Так он не поддаётся
+# формулировкам исходной инструкции и судит по тому, что написано.
+AUDITOR_ROLE = (
+    "Ты проверяешь ответ ассистента на нарушение жёстких ограничений проекта. "
+    "Нарушение — это когда ответ ПРЕДЛАГАЕТ, РЕКОМЕНДУЕТ или ОПИСЫВАЕТ КАК "
+    "СДЕЛАТЬ то, что ограничение запрещает. "
+    "Упоминание запрещённого при объяснении отказа нарушением НЕ является: "
+    "фраза «MongoDB использовать нельзя, потому что…» — это соблюдение, "
+    "а не нарушение.\n\n"
+    "Верни JSON: {\"violations\": [{\"id\": номер_ограничения, "
+    "\"quote\": \"цитата из ответа\", \"why\": \"чем нарушает\"}]}. "
+    "Если нарушений нет — пустой массив. Ничего не выдумывай."
+)
+
 TRACKER_ROLE = (
     "Ты следишь за состоянием рабочей задачи. Верни JSON с ключами:\n"
     '  "stage" — предлагаемый этап: planning, execution, validation или done;\n'
@@ -275,6 +298,12 @@ class Agent:
         self.task: TaskState | None = None
         self.tracking = False       # включает автослежение за этапом
 
+        # День 14: чего агенту нельзя. Инварианты живут вне сессий —
+        # архитектура и стек одни на весь проект.
+        self.invariants: list[Invariant] = []
+        self.auditing = False       # включает проверку ответов на нарушения
+        self.last_audit: dict = {}  # результат последней проверки
+
         self._history: list[dict] = []
         self.stats = Stats()
         self.journal: list[Call] = []
@@ -383,16 +412,18 @@ class Agent:
         memos = sum(estimate_text(f"- {m.key}: {m.value}") for m in self.memos)
         profile = estimate_text(self.profile.as_prompt()) if self.profile else 0
         task = estimate_text(self.task.as_prompt()) if self.task else 0
+        invariants = estimate_text(self._invariants_prompt())
         history = sum(estimate_text(item.get("content", "")) + MESSAGE_OVERHEAD
                       for item in self._history)
         question = estimate_text(message)
-        total = (REQUEST_OVERHEAD + role + profile + task + summary + facts
-                 + memos + history + question)
+        total = (REQUEST_OVERHEAD + role + invariants + profile + task + summary
+                 + facts + memos + history + question)
 
         limit = limit_of(self.model)
         return {
             "overhead": REQUEST_OVERHEAD,
             "role": role,
+            "invariants": invariants,
             "profile": profile,
             "task": task,
             "summary": summary,
@@ -486,6 +517,13 @@ class Agent:
         справка о том, что было раньше.
         """
         куски = [self.role]
+        # Инварианты идут ПЕРВЫМИ, вперёд всего остального. Это не справка
+        # и не пожелание: если они окажутся в конце длинного промпта, между
+        # пересказом и списком фактов, шансов, что модель их соблюдёт,
+        # заметно меньше.
+        блок = self._invariants_prompt()
+        if блок:
+            куски.append(блок)
         # Профиль идёт сразу за ролью, ПЕРЕД всякой памятью: это указания
         # о форме ответа, и они должны действовать независимо от того,
         # что агент успел запомнить.
@@ -743,6 +781,122 @@ class Agent:
                                "pairs": 0, "updated": "", "active": True})
         return найдено
 
+    # ── инварианты (день 14) ────────────────────────────────────────────
+    def _invariants_prompt(self) -> str:
+        """Блок ограничений. Формулировка намеренно жёсткая и с инструкцией.
+
+        Просто перечислить ограничения мало: модель воспримет их как
+        справку и будет «учитывать». Нужно прямо сказать, что делать
+        при конфликте, — иначе она вежливо предложит запрещённое
+        с оговоркой «хотя у вас вроде нельзя».
+        """
+        живые = [i for i in self.invariants if i.active]
+        if not живые:
+            return ""
+        строки = []
+        for i in живые:
+            строка = f"{i.id}. [{i.scope_label}] {i.text}"
+            if i.rationale:
+                строка += f"\n   причина: {i.rationale}"
+            строки.append(строка)
+        return (
+            "[НЕРУШИМЫЕ ОГРАНИЧЕНИЯ ПРОЕКТА]\n"
+            "Это уже принятые решения. Они не обсуждаются и не пересматриваются "
+            "в ответе. Твои обязанности:\n"
+            "1. Учитывать их в каждом ответе.\n"
+            "2. Если просьба требует нарушить ограничение — ОТКАЗАТЬСЯ "
+            "предлагать такое решение.\n"
+            "3. В отказе назвать номер и текст ограничения, объяснить причину "
+            "и предложить вариант В ЕГО РАМКАХ.\n"
+            "4. Не предлагать обходные пути, которые нарушают ограничение "
+            "по сути.\n\n"
+            + "\n".join(строки)
+        )
+
+    def add_invariant(self, text: str, *, rationale: str = "",
+                      scope: str = "stack") -> Invariant | None:
+        """Завести ограничение."""
+        text = text.strip()
+        if not text or not self.store:
+            return None
+        inv = self.store.save_invariant(
+            Invariant(text=text, rationale=rationale.strip(), scope=scope,
+                      active=True, at=now_iso()))
+        self.invariants = self.store.invariants()
+        return inv
+
+    def toggle_invariant(self, inv_id: int, active: bool) -> bool:
+        """Включить или отключить ограничение, не удаляя его.
+
+        Отключение нужно для демонстрации: один и тот же вопрос с живым
+        инвариантом и без него — самый наглядный способ показать, что он
+        вообще работает.
+        """
+        if not self.store:
+            return False
+        найден = next((i for i in self.store.invariants() if i.id == inv_id), None)
+        if найден is None:
+            return False
+        найден.active = active
+        self.store.save_invariant(найден)
+        self.invariants = self.store.invariants()
+        return True
+
+    def drop_invariant(self, inv_id: int) -> bool:
+        if not self.store:
+            return False
+        получилось = self.store.delete_invariant(inv_id)
+        self.invariants = self.store.invariants()
+        return получилось
+
+    def audit(self, answer: str) -> dict:
+        """Проверяет ответ на нарушение инвариантов.
+
+        Возвращает {"ok": bool, "violations": [...]}. Пустой список нарушений
+        при живых инвариантах — это и есть «соблюдает»; непустой — пойманное
+        нарушение, которое надо показать, а не замолчать.
+        """
+        живые = [i for i in self.invariants if i.active]
+        if not живые or not answer.strip():
+            return {"ok": True, "violations": [], "checked": len(живые)}
+
+        перечень = "\n".join(f"{i.id}. {i.text}" for i in живые)
+        ответ = ask(
+            f"Ограничения:\n{перечень}\n\nОтвет ассистента:\n{answer}\n\n"
+            f"Есть ли нарушения? Верни JSON.",
+            system=AUDITOR_ROLE, model=self.model, json_mode=True,
+            temperature=0.0, max_tokens=FACTS_MAX_TOKENS, provider=self.provider)
+
+        self.stats.extractions += 1
+        self.stats.extraction_prompt_tokens += ответ.prompt_tokens
+        self.stats.extraction_completion_tokens += ответ.completion_tokens
+
+        сырой = (ответ.text or "").strip()
+        итог = {"ok": True, "violations": [], "checked": len(живые)}
+        if not сырой:
+            return итог
+        try:
+            разобрано = _json.loads(сырой)
+        except _json.JSONDecodeError:
+            return итог
+        нарушения = разобрано.get("violations") if isinstance(разобрано, dict) else None
+        if isinstance(нарушения, list) and нарушения:
+            по_номеру = {i.id: i for i in живые}
+            собрано = []
+            for n in нарушения:
+                if not isinstance(n, dict):
+                    continue
+                номер = int(n.get("id", 0) or 0)
+                собрано.append({
+                    "id": номер,
+                    "text": по_номеру[номер].text if номер in по_номеру else "",
+                    "quote": str(n.get("quote", ""))[:200],
+                    "why": str(n.get("why", ""))[:300],
+                })
+            итог = {"ok": not собрано, "violations": собрано, "checked": len(живые)}
+        self.last_audit = итог
+        return итог
+
     # ── состояние задачи, конечный автомат (день 13) ────────────────────
     def start_task(self, goal: str = "", *, step: str = "",
                    expecting: str = "") -> TaskState:
@@ -976,6 +1130,8 @@ class Agent:
         # оказался бы с обрывком окна и без всего, что было свёрнуто.
         self.summary = self.store.load_summary(self.session)
         self.facts = self.store.load_facts(self.session)
+        # Инварианты не привязаны к чату: они одни на проект.
+        self.invariants = self.store.invariants()
         # Состояние задачи поднимается вместе с чатом — это и есть
         # «продолжение без повторных объяснений».
         self.task = self.store.load_task(self.session)

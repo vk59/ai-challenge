@@ -42,6 +42,7 @@
 | 11 | Модель памяти агента | [days/day-11-memory-model](days/day-11-memory-model) | ✅ код готов, нужно видео |
 | 12 | Персонализация | [days/day-12-personalization](days/day-12-personalization) | ✅ код готов, нужно видео |
 | 13 | Состояние задачи | [days/day-13-task-state](days/day-13-task-state) | ✅ код готов, нужно видео |
+| 14 | Инварианты | [days/day-14-invariants](days/day-14-invariants) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 
