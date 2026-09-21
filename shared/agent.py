@@ -27,8 +27,8 @@ import json as _json
 
 from llm import LLMError, Provider, ask, ask_stream
 from memory import (DECISION, DEFAULT_SESSION, KNOWLEDGE, LONG, LONG_KINDS,
-                    PROFILE, SHORT, WORKING, Fact, Memo, Profile, Store, Summary,
-                    Turn, now_iso)
+                    PLANNING, PROFILE, SHORT, STAGE_LABELS, STAGES, WORKING,
+                    Fact, Memo, Profile, Store, Summary, TaskState, Turn, now_iso)
 from tokens import cost, estimate_request, limit_of, money
 
 # Стратегии управления контекстом (день 10).
@@ -53,6 +53,23 @@ FACTS_ROLE = (
 # всё уходит в размышление, а content приходит ПУСТЫМ с finish=length.
 # Отсюда запас: полторы тысячи там, где видимого текста на две сотни.
 FACTS_MAX_TOKENS = 1500
+
+# День 13: модель докладывает, где задача. Обратите внимание, чего здесь
+# НЕТ: права переводить этап куда вздумается. Модель лишь предлагает,
+# а допустим ли переход — решает автомат в TRANSITIONS. Иначе «конечный
+# автомат» выродился бы в ярлык, который модель меняет как хочет.
+TRACKER_ROLE = (
+    "Ты следишь за состоянием рабочей задачи. Верни JSON с ключами:\n"
+    '  "stage" — предлагаемый этап: planning, execution, validation или done;\n'
+    '  "step" — чем конкретно заняты прямо сейчас, одной строкой;\n'
+    '  "expecting" — чего ждём дальше и от кого (от пользователя или от '
+    "ассистента), одной строкой;\n"
+    '  "goal" — что за задача решается, одной строкой (если уже понятно).\n\n'
+    "Этап меняй только когда это видно из разговора: planning — обсуждаем "
+    "и решаем, как делать; execution — делаем; validation — проверяем "
+    "сделанное; done — задача закрыта и подтверждена. "
+    "Если этап не изменился — верни текущий. Ничего не выдумывай."
+)
 
 # День 11: разбор реплики по слоям памяти. Модель не просто извлекает факты,
 # а СРАЗУ говорит, куда их класть, — это и есть «явно выбирать, что и куда
@@ -252,6 +269,12 @@ class Agent:
         # переключением, в том числе посреди разговора.
         self.profile: Profile | None = None
 
+        # День 13: где сейчас задача. Хранится отдельно от диалога, поэтому
+        # переживает и вытеснение окна, и перезапуск — на этом держится
+        # «пауза на любом этапе и продолжение без повторных объяснений».
+        self.task: TaskState | None = None
+        self.tracking = False       # включает автослежение за этапом
+
         self._history: list[dict] = []
         self.stats = Stats()
         self.journal: list[Call] = []
@@ -327,6 +350,8 @@ class Agent:
         self.stats = Stats()
         self.summary = None
         self.facts = []
+        # Задача стирается вместе с чатом: чат и есть задача.
+        self.task = None
         # memos НЕ трогаем: «стереть диалог» не должно означать «забыть
         # человека». Для долговременной памяти есть отдельный forget().
         if self.store:
@@ -357,17 +382,19 @@ class Agent:
         facts = sum(estimate_text(f"- {f.key}: {f.value}") for f in self.facts)
         memos = sum(estimate_text(f"- {m.key}: {m.value}") for m in self.memos)
         profile = estimate_text(self.profile.as_prompt()) if self.profile else 0
+        task = estimate_text(self.task.as_prompt()) if self.task else 0
         history = sum(estimate_text(item.get("content", "")) + MESSAGE_OVERHEAD
                       for item in self._history)
         question = estimate_text(message)
-        total = (REQUEST_OVERHEAD + role + profile + summary + facts + memos
-                 + history + question)
+        total = (REQUEST_OVERHEAD + role + profile + task + summary + facts
+                 + memos + history + question)
 
         limit = limit_of(self.model)
         return {
             "overhead": REQUEST_OVERHEAD,
             "role": role,
             "profile": profile,
+            "task": task,
             "summary": summary,
             "facts": facts,
             "memos": memos,
@@ -466,6 +493,10 @@ class Agent:
             блок = self.profile.as_prompt()
             if блок:
                 куски.append(блок)
+        # Состояние задачи идёт перед памятью: для текущего ответа важнее
+        # знать, на каком мы этапе, чем что обсуждали сорок реплик назад.
+        if self.task:
+            куски.append(self.task.as_prompt())
         if self.summary and self.summary.content:
             куски.append("[Ранее в этом диалоге, сжатый пересказ]\n"
                          + self.summary.content)
@@ -712,6 +743,128 @@ class Agent:
                                "pairs": 0, "updated": "", "active": True})
         return найдено
 
+    # ── состояние задачи, конечный автомат (день 13) ────────────────────
+    def start_task(self, goal: str = "", *, step: str = "",
+                   expecting: str = "") -> TaskState:
+        """Завести задачу. Новая задача всегда начинается с планирования."""
+        self.task = TaskState(stage=PLANNING, goal=goal.strip(), step=step.strip(),
+                              expecting=expecting.strip(), updated=now_iso(),
+                              log=[{"at": now_iso(), "to": PLANNING,
+                                    "note": "задача заведена"}])
+        self._save_task()
+        return self.task
+
+    def advance(self, to: str, note: str = "") -> tuple[bool, str]:
+        """Перевести задачу на другой этап. Возвращает (получилось, объяснение).
+
+        Здесь и живёт автомат. Переход разрешён, только если такое ребро
+        есть в TRANSITIONS; иначе отказ с внятной причиной, а не молчаливое
+        присваивание. Именно эта проверка отличает конечный автомат от поля
+        «этап», в которое можно записать что угодно.
+        """
+        if to not in STAGES:
+            return False, f"Нет такого этапа: {to!r}"
+        if self.task is None:
+            return False, "Задача ещё не заведена"
+        if to == self.task.stage:
+            return False, f"Задача уже на этапе «{self.task.label}»"
+        if not self.task.can_go(to):
+            куда = (", ".join(f"«{STAGE_LABELS[s]}»" for s in self.task.allowed)
+                    or "никуда, задача завершена")
+            return False, (f"Из «{self.task.label}» нельзя сразу в "
+                           f"«{STAGE_LABELS[to]}». Доступно: {куда}")
+
+        откуда = self.task.stage
+        self.task.stage = to
+        self.task.updated = now_iso()
+        self.task.log.append({"at": self.task.updated, "from": откуда, "to": to,
+                              "note": note.strip()})
+        self._save_task()
+        return True, f"{STAGE_LABELS[откуда]} → {STAGE_LABELS[to]}"
+
+    def update_task(self, *, step: str | None = None, expecting: str | None = None,
+                    goal: str | None = None) -> None:
+        """Поправить шаг, ожидание или цель, не трогая этап."""
+        if self.task is None:
+            self.task = TaskState(updated=now_iso())
+        if step is not None:
+            self.task.step = step.strip()
+        if expecting is not None:
+            self.task.expecting = expecting.strip()
+        if goal is not None:
+            self.task.goal = goal.strip()
+        self.task.updated = now_iso()
+        self._save_task()
+
+    def task_view(self) -> dict | None:
+        """Снимок состояния для интерфейса."""
+        if self.task is None:
+            return None
+        t = self.task
+        return {
+            "stage": t.stage, "label": t.label, "step": t.step,
+            "expecting": t.expecting, "goal": t.goal, "updated": t.updated,
+            "allowed": [{"stage": s, "label": STAGE_LABELS[s]} for s in t.allowed],
+            "stages": [{"stage": s, "label": STAGE_LABELS[s],
+                        "passed": any(z.get("to") == s for z in t.log),
+                        "current": s == t.stage} for s in STAGES],
+            "log": t.log[-8:],
+        }
+
+    def _save_task(self) -> None:
+        if self.store and self.task:
+            self.store.save_task(self.session, self.task)
+
+    def _track_task(self, question: str, answer: str) -> dict:
+        """Спрашивает модель, где задача, и проверяет её предложение автоматом.
+
+        Возвращает, что изменилось, — в том числе ОТКЛОНЁННЫЙ переход.
+        Отклонения показываются в интерфейсе намеренно: это единственное
+        наглядное доказательство, что автомат работает, а не просто
+        записывает то, что сказала модель.
+        """
+        текущее = (self.task.as_prompt() if self.task
+                   else "[Состояние задачи]\n- задача ещё не заведена")
+        запрос = (f"{текущее}\n\nРеплика пользователя:\n{question}\n\n"
+                  f"Ответ ассистента:\n{answer}\n\n"
+                  f"Где сейчас задача? Верни JSON.")
+
+        ответ = ask(запрос, system=TRACKER_ROLE, model=self.model, json_mode=True,
+                    temperature=0.1, max_tokens=FACTS_MAX_TOKENS,
+                    provider=self.provider)
+
+        self.stats.extractions += 1
+        self.stats.extraction_prompt_tokens += ответ.prompt_tokens
+        self.stats.extraction_completion_tokens += ответ.completion_tokens
+
+        сырой = (ответ.text or "").strip()
+        итог: dict = {"moved": "", "rejected": "", "step": "", "expecting": ""}
+        if not сырой:
+            return итог
+        try:
+            разобрано = _json.loads(сырой)
+        except _json.JSONDecodeError:
+            return итог
+        if not isinstance(разобрано, dict):
+            return итог
+
+        if self.task is None:
+            self.start_task(str(разобрано.get("goal", "")).strip())
+
+        шаг = str(разобрано.get("step", "")).strip()
+        ждём = str(разобрано.get("expecting", "")).strip()
+        цель = str(разобрано.get("goal", "")).strip()
+        if шаг or ждём or (цель and not self.task.goal):
+            self.update_task(step=шаг or None, expecting=ждём or None,
+                             goal=цель if цель and not self.task.goal else None)
+            итог["step"], итог["expecting"] = self.task.step, self.task.expecting
+
+        предложен = str(разобрано.get("stage", "")).strip()
+        if предложен and предложен != self.task.stage:
+            получилось, почему = self.advance(предложен, "предложено по ходу разговора")
+            итог["moved" if получилось else "rejected"] = почему
+        return итог
+
     # ── персонализация (день 12) ────────────────────────────────────────
     def use_profile(self, name: str | None) -> bool:
         """Включить профиль по имени; None — снять персонализацию."""
@@ -815,6 +968,7 @@ class Agent:
         self.stats = Stats()
         self.summary = None
         self.facts = []
+        self.task = None
         if not self.store:
             return
 
@@ -822,6 +976,9 @@ class Agent:
         # оказался бы с обрывком окна и без всего, что было свёрнуто.
         self.summary = self.store.load_summary(self.session)
         self.facts = self.store.load_facts(self.session)
+        # Состояние задачи поднимается вместе с чатом — это и есть
+        # «продолжение без повторных объяснений».
+        self.task = self.store.load_task(self.session)
         # Долговременная память грузится независимо от сессии — в этом
         # и смысл слоя: она уже была здесь до этого диалога.
         self.memos = self.store.recall()
@@ -870,6 +1027,14 @@ class Agent:
         # Карточка фактов обновляется после каждой реплики — как требует
         # задание. Сбой извлечения не должен ронять диалог: факты останутся
         # прежними, разговор продолжится.
+        if self.tracking:
+            # День 13: слежение за этапом. Сбой не должен ронять разговор —
+            # состояние просто останется прежним.
+            try:
+                self._track_task(question, answer)
+            except LLMError:
+                pass
+
         if self.layered:
             # День 11: раскладка по слоям заменяет простое извлечение фактов —
             # она делает то же самое и вдобавок решает, что достойно

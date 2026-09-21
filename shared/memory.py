@@ -24,7 +24,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -219,6 +219,95 @@ class Memo:
                    source=str(raw.get("source", "")))
 
 
+# Состояние задачи как конечный автомат (день 13).
+#
+# Этапы и — что важнее — РЁБРА между ними. Без рёбер это был бы просто
+# ярлык «этап», который можно поставить любой. Автомат начинается там,
+# где переход planning → done становится невозможным.
+PLANNING, EXECUTION, VALIDATION, DONE = (
+    "planning", "execution", "validation", "done")
+STAGES = (PLANNING, EXECUTION, VALIDATION, DONE)
+
+TRANSITIONS: dict[str, tuple[str, ...]] = {
+    PLANNING: (EXECUTION,),
+    # Из работы можно вернуться к планированию: выяснилось, что план не годится.
+    EXECUTION: (VALIDATION, PLANNING),
+    # Проверка не прошла — обратно в работу. Это главное ребро назад,
+    # без него автомат описывал бы только счастливый путь.
+    VALIDATION: (DONE, EXECUTION),
+    DONE: (),
+}
+
+STAGE_LABELS = {PLANNING: "планирование", EXECUTION: "выполнение",
+                VALIDATION: "проверка", DONE: "готово"}
+
+
+@dataclass
+class TaskState:
+    """Где сейчас задача: этап, шаг и чьего действия ждём.
+
+    Лежит отдельно от диалога и переживает перезапуск — в этом весь смысл.
+    Пауза на любом этапе и продолжение без повторных объяснений работают
+    не потому, что агент «помнит разговор», а потому, что состояние задачи
+    записано явно и не зависит от того, влезла история в окно контекста
+    или нет.
+    """
+
+    stage: str = PLANNING
+    step: str = ""           # текущий шаг внутри этапа
+    expecting: str = ""      # чего ждём и от кого
+    goal: str = ""           # что вообще делаем
+    updated: str = ""
+    # История переходов — короткий список, запросов по нему не делаем,
+    # поэтому хранится одним JSON-полем, а не отдельной таблицей.
+    log: list = field(default_factory=list)
+
+    @property
+    def label(self) -> str:
+        return STAGE_LABELS.get(self.stage, self.stage)
+
+    @property
+    def allowed(self) -> tuple[str, ...]:
+        """Куда отсюда можно перейти. Пустой кортеж — тупик (done)."""
+        return TRANSITIONS.get(self.stage, ())
+
+    def can_go(self, to: str) -> bool:
+        return to in self.allowed
+
+    def as_prompt(self) -> str:
+        """Состояние в виде куска системного промпта."""
+        строки = [f"- этап: {self.label}"]
+        if self.goal:
+            строки.insert(0, f"- задача: {self.goal}")
+        if self.step:
+            строки.append(f"- текущий шаг: {self.step}")
+        if self.expecting:
+            строки.append(f"- ждём: {self.expecting}")
+        if self.allowed:
+            куда = ", ".join(STAGE_LABELS[s] for s in self.allowed)
+            строки.append(f"- дальше возможно: {куда}")
+        else:
+            строки.append("- задача завершена")
+        пройдено = [z for z in self.log if z.get("to")]
+        if пройдено:
+            путь = " → ".join(STAGE_LABELS.get(z["to"], z["to"]) for z in пройдено[-4:])
+            строки.append(f"- уже пройдено: {путь}")
+        return "[Состояние задачи]\n" + "\n".join(строки)
+
+    def as_dict(self) -> dict:
+        return {"stage": self.stage, "step": self.step, "expecting": self.expecting,
+                "goal": self.goal, "updated": self.updated, "log": self.log}
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "TaskState":
+        return cls(stage=str(raw.get("stage", PLANNING)),
+                   step=str(raw.get("step", "")),
+                   expecting=str(raw.get("expecting", "")),
+                   goal=str(raw.get("goal", "")),
+                   updated=str(raw.get("updated", "")),
+                   log=list(raw.get("log") or []))
+
+
 @dataclass
 class Profile:
     """Профиль пользователя — предпочтения, а не факты (день 12).
@@ -361,6 +450,14 @@ class Store:
         """Забыть одну запись навсегда. True — если было что забывать."""
         raise NotImplementedError
 
+    # ── состояние задачи (день 13) ──────────────────────────────────────
+    def save_task(self, session: str, task: TaskState) -> None:
+        """Состояние задачи привязано к чату: чат и есть задача."""
+        raise NotImplementedError
+
+    def load_task(self, session: str) -> TaskState | None:
+        raise NotImplementedError
+
     # ── профили пользователя (день 12) ──────────────────────────────────
     def save_profile(self, profile: Profile) -> None:
         """Сохранить профиль. Как и долговременная память — вне сессий."""
@@ -394,6 +491,9 @@ class Store:
         факты = self.load_facts(session)
         if факты:
             self.save_facts(branch, факты)
+        задача = self.load_task(session)
+        if задача:
+            self.save_task(branch, задача)
         пересказ = self.load_summary(session)
         if пересказ:
             self.save_summary(branch, пересказ)
@@ -529,6 +629,16 @@ class JsonStore(Store):
             data = self._read(session)
             data["facts"] = [f.as_dict() for f in facts]
             self._write(session, data)
+
+    def save_task(self, session: str, task: TaskState) -> None:
+        with self._lock:
+            data = self._read(session)
+            data["task"] = task.as_dict()
+            self._write(session, data)
+
+    def load_task(self, session: str) -> TaskState | None:
+        raw = self._read(session).get("task")
+        return TaskState.from_dict(raw) if raw else None
 
     def load_facts(self, session: str) -> list[Fact]:
         return [Fact.from_dict(r) for r in self._read(session).get("facts") or []]
@@ -721,6 +831,19 @@ class SqliteStore(Store):
     -- Профили пользователя (день 12): не факты О человеке, а указания,
     -- КАК с ним говорить. Тоже вне сессий, и их может быть несколько —
     -- иначе не сравнить, как один вопрос звучит для новичка и для senior.
+    -- Состояние задачи (день 13). По одному на чат: чат и есть задача.
+    -- Лежит отдельно от реплик, поэтому переживает и вытеснение окна,
+    -- и перезапуск — на этом держится «пауза и продолжение».
+    CREATE TABLE IF NOT EXISTS task_state (
+        session   TEXT PRIMARY KEY,
+        stage     TEXT NOT NULL DEFAULT 'planning',
+        step      TEXT NOT NULL DEFAULT '',
+        expecting TEXT NOT NULL DEFAULT '',
+        goal      TEXT NOT NULL DEFAULT '',
+        updated   TEXT NOT NULL DEFAULT '',
+        log       TEXT NOT NULL DEFAULT '[]'
+    );
+
     CREATE TABLE IF NOT EXISTS profiles (
         name        TEXT PRIMARY KEY,
         tone        TEXT NOT NULL DEFAULT '',
@@ -820,6 +943,8 @@ class SqliteStore(Store):
                        (new_name, session))
             db.execute("UPDATE summaries SET session = ? WHERE session = ?",
                        (new_name, session))
+            db.execute("UPDATE task_state SET session = ? WHERE session = ?",
+                       (new_name, session))
         return True
 
     def clear(self, session: str) -> None:
@@ -829,6 +954,9 @@ class SqliteStore(Store):
             # из стёртого диалога, и она всплыла бы при следующем запуске.
             db.execute("DELETE FROM summaries WHERE session = ?", (session,))
             db.execute("DELETE FROM facts WHERE session = ?", (session,))
+            # И состояние задачи: иначе стёртый чат оставил бы после себя
+            # этап и шаг, которые всплыли бы при следующем чате с тем же именем.
+            db.execute("DELETE FROM task_state WHERE session = ?", (session,))
 
     def save_summary(self, session: str, summary: Summary) -> None:
         with self._connect() as db:
@@ -896,6 +1024,33 @@ class SqliteStore(Store):
         with self._connect() as db:
             cur = db.execute("DELETE FROM longterm WHERE key = ?", (key,))
             return cur.rowcount > 0
+
+    def save_task(self, session: str, task: TaskState) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO task_state (session, stage, step, expecting, goal,"
+                " updated, log) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(session) DO UPDATE SET stage = excluded.stage,"
+                "   step = excluded.step, expecting = excluded.expecting,"
+                "   goal = excluded.goal, updated = excluded.updated,"
+                "   log = excluded.log",
+                (session, task.stage, task.step, task.expecting, task.goal,
+                 task.updated, json.dumps(task.log, ensure_ascii=False)),
+            )
+
+    def load_task(self, session: str) -> TaskState | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT stage, step, expecting, goal, updated, log FROM task_state"
+                " WHERE session = ?", (session,)).fetchone()
+        if not row:
+            return None
+        try:
+            журнал = json.loads(row[5] or "[]")
+        except json.JSONDecodeError:
+            журнал = []
+        return TaskState(stage=row[0], step=row[1], expecting=row[2], goal=row[3],
+                         updated=row[4], log=журнал)
 
     ПРОФИЛЬ_ПОЛЯ = ("name", "tone", "format", "level", "constraints",
                     "language", "extra")
@@ -978,7 +1133,10 @@ def _safe_name(session: str) -> str:
 
 
 __all__ = ["Store", "JsonStore", "SqliteStore", "Turn", "SessionInfo", "Totals",
-           "Summary", "Fact", "Memo", "Profile", "open_store", "default_dir", "now_iso",
+           "Summary", "Fact", "Memo", "Profile", "TaskState",
+           "STAGES", "TRANSITIONS", "STAGE_LABELS",
+           "PLANNING", "EXECUTION", "VALIDATION", "DONE",
+           "open_store", "default_dir", "now_iso",
            "local_time", "DEFAULT_SESSION", "ENV_DIR_VAR", "MemoryError_",
            "SHORT", "WORKING", "LONG", "LAYERS",
            "PROFILE", "DECISION", "KNOWLEDGE", "LONG_KINDS"]
