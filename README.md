@@ -40,6 +40,7 @@
 | 09 | Сжатие истории | [days/day-09-compression](days/day-09-compression) | ✅ сдано |
 | 10 | Стратегии контекста | [days/day-10-strategies](days/day-10-strategies) | ✅ сдано |
 | 11 | Модель памяти агента | [days/day-11-memory-model](days/day-11-memory-model) | ✅ код готов, нужно видео |
+| 12 | Персонализация | [days/day-12-personalization](days/day-12-personalization) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 

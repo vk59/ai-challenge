@@ -116,6 +116,18 @@ class SessionInfo:
     tokens: int
     started: str
     updated: str
+    # Первая реплика пользователя — из неё делается заголовок в списке чатов.
+    # «диалог-2» ни о чём не говорит, а «Собираем ТЗ на складской учёт» —
+    # говорит, и искать глазами по такому списку можно.
+    first: str = ""
+
+    @property
+    def title(self) -> str:
+        """Человеческий заголовок чата: по первой реплике, иначе по имени."""
+        текст = " ".join((self.first or "").split())
+        if not текст:
+            return self.name
+        return текст[:38] + "…" if len(текст) > 39 else текст
 
     @property
     def pairs(self) -> int:
@@ -208,6 +220,59 @@ class Memo:
 
 
 @dataclass
+class Profile:
+    """Профиль пользователя — предпочтения, а не факты (день 12).
+
+    Отличие от PROFILE-записей долговременной памяти принципиальное:
+    там факты О человеке («имя: Иван»), здесь указания КАК с ним говорить
+    («отвечай кратко, без кода, по-русски»). Первое агент узнаёт сам из
+    диалога, второе задаётся сознательно и меняется одним переключением.
+
+    Профилей может быть несколько — иначе нельзя сравнить, как один
+    и тот же вопрос звучит для новичка и для эксперта.
+    """
+
+    name: str
+    tone: str = ""           # как разговаривать: кратко, подробно, по-дружески
+    format: str = ""         # чем отвечать: код, списки, проза, таблицы
+    level: str = ""          # уровень собеседника: новичок, senior
+    constraints: str = ""    # чего НЕ делать
+    language: str = ""       # язык ответа
+    extra: str = ""          # всё, что не легло в поля выше
+
+    ПОЛЯ = (("tone", "тон"), ("format", "формат"), ("level", "уровень"),
+            ("language", "язык"), ("constraints", "ограничения"),
+            ("extra", "дополнительно"))
+
+    def as_dict(self) -> dict:
+        return {"name": self.name, "tone": self.tone, "format": self.format,
+                "level": self.level, "constraints": self.constraints,
+                "language": self.language, "extra": self.extra}
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> "Profile":
+        return cls(name=str(raw.get("name", "")), tone=str(raw.get("tone", "")),
+                   format=str(raw.get("format", "")), level=str(raw.get("level", "")),
+                   constraints=str(raw.get("constraints", "")),
+                   language=str(raw.get("language", "")),
+                   extra=str(raw.get("extra", "")))
+
+    @property
+    def filled(self) -> list[tuple[str, str]]:
+        """Только заполненные предпочтения, с русскими подписями."""
+        return [(подпись, getattr(self, поле))
+                for поле, подпись in self.ПОЛЯ if getattr(self, поле).strip()]
+
+    def as_prompt(self) -> str:
+        """Профиль в виде куска системного промпта."""
+        строки = self.filled
+        if not строки:
+            return ""
+        тело = "\n".join(f"- {подпись}: {значение}" for подпись, значение in строки)
+        return f"[Как отвечать этому собеседнику]\n{тело}"
+
+
+@dataclass
 class Fact:
     """Один факт из диалога — ключ и значение (день 10).
 
@@ -256,6 +321,15 @@ class Store:
         """Стереть сессию. Забыть — значит забыть и на диске тоже."""
         raise NotImplementedError
 
+    def rename(self, session: str, new_name: str) -> bool:
+        """Переименовать диалог. False — если имя занято или переименовывать нечего.
+
+        Переносить надо ВСЕ следы сессии разом: реплики, факты и пересказ.
+        Забыть про один из них — значит оставить осиротевшие данные под
+        старым именем, которые потом всплывут в чужом диалоге.
+        """
+        raise NotImplementedError
+
     # ── сжатая история (день 9) ─────────────────────────────────────────
     def save_summary(self, session: str, summary: Summary) -> None:
         """Сохранить пересказ. Один на сессию: он накопительный, не список."""
@@ -285,6 +359,20 @@ class Store:
 
     def forget(self, key: str) -> bool:
         """Забыть одну запись навсегда. True — если было что забывать."""
+        raise NotImplementedError
+
+    # ── профили пользователя (день 12) ──────────────────────────────────
+    def save_profile(self, profile: Profile) -> None:
+        """Сохранить профиль. Как и долговременная память — вне сессий."""
+        raise NotImplementedError
+
+    def load_profile(self, name: str) -> Profile | None:
+        raise NotImplementedError
+
+    def profiles(self) -> list[Profile]:
+        raise NotImplementedError
+
+    def delete_profile(self, name: str) -> bool:
         raise NotImplementedError
 
     def fork(self, session: str, branch: str, upto: int) -> int:
@@ -385,19 +473,42 @@ class JsonStore(Store):
     def sessions(self) -> list[SessionInfo]:
         found = []
         for path in self.dir.glob("*.json"):
+            # Служебные файлы — не диалоги. Долговременная память и профили
+            # лежат в том же каталоге (_longterm.json, _profiles.json), и без
+            # этой проверки они показывались бы в списке чатов как «_profiles».
+            if path.name.startswith("_"):
+                continue
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
             turns = data.get("turns") or []
+            первая = next((str(t.get("content", "")) for t in turns
+                           if t.get("role") == "user"), "")
             found.append(SessionInfo(
                 name=str(data.get("session") or path.stem),
                 turns=len(turns),
                 tokens=sum(int(t.get("tokens", 0) or 0) for t in turns),
                 started=str(data.get("started") or ""),
                 updated=str(data.get("updated") or ""),
+                first=первая,
             ))
         return sorted(found, key=lambda s: s.updated, reverse=True)
+
+    def rename(self, session: str, new_name: str) -> bool:
+        with self._lock:
+            источник = self._path(session)
+            цель = self._path(new_name)
+            if not источник.exists() or цель.exists() or источник == цель:
+                return False
+            data = self._read(session)
+            data["session"] = new_name
+            # Пишем под новым именем и только потом сносим старый файл:
+            # если что-то упадёт посередине, диалог останется хотя бы в одном
+            # из двух мест, а не исчезнет.
+            self._write(new_name, data)
+            источник.unlink(missing_ok=True)
+            return True
 
     def clear(self, session: str) -> None:
         with self._lock:
@@ -448,6 +559,50 @@ class JsonStore(Store):
                 return False
             self._write_long(осталось)
             return True
+
+    def _profiles_path(self) -> Path:
+        return self.dir / "_profiles.json"
+
+    def save_profile(self, profile: Profile) -> None:
+        with self._lock:
+            все = {p.name: p for p in self._read_profiles()}
+            все[profile.name] = profile
+            self._write_profiles(list(все.values()))
+
+    def load_profile(self, name: str) -> Profile | None:
+        return next((p for p in self._read_profiles() if p.name == name), None)
+
+    def profiles(self) -> list[Profile]:
+        return sorted(self._read_profiles(), key=lambda p: p.name)
+
+    def delete_profile(self, name: str) -> bool:
+        with self._lock:
+            все = self._read_profiles()
+            осталось = [p for p in все if p.name != name]
+            if len(осталось) == len(все):
+                return False
+            self._write_profiles(осталось)
+            return True
+
+    def _read_profiles(self) -> list[Profile]:
+        try:
+            raw = json.loads(self._profiles_path().read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return []
+        except (json.JSONDecodeError, OSError) as exc:
+            raise MemoryError_(f"Профили повреждены: {exc}") from exc
+        return [Profile.from_dict(r) for r in raw.get("profiles") or []]
+
+    def _write_profiles(self, профили: list[Profile]) -> None:
+        путь = self._profiles_path()
+        tmp = путь.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps({"profiles": [p.as_dict() for p in профили]},
+                                      ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, путь)
+        except OSError as exc:
+            tmp.unlink(missing_ok=True)
+            raise MemoryError_(f"Не пишутся профили: {exc}") from exc
 
     def _read_long(self) -> list[Memo]:
         try:
@@ -562,6 +717,19 @@ class SqliteStore(Store):
         at       TEXT    NOT NULL DEFAULT '',
         source   TEXT    NOT NULL DEFAULT ''
     );
+
+    -- Профили пользователя (день 12): не факты О человеке, а указания,
+    -- КАК с ним говорить. Тоже вне сессий, и их может быть несколько —
+    -- иначе не сравнить, как один вопрос звучит для новичка и для senior.
+    CREATE TABLE IF NOT EXISTS profiles (
+        name        TEXT PRIMARY KEY,
+        tone        TEXT NOT NULL DEFAULT '',
+        format      TEXT NOT NULL DEFAULT '',
+        level       TEXT NOT NULL DEFAULT '',
+        constraints TEXT NOT NULL DEFAULT '',
+        language    TEXT NOT NULL DEFAULT '',
+        extra       TEXT NOT NULL DEFAULT ''
+    );
     """
 
     def __init__(self, path: Path | str | None = None) -> None:
@@ -622,14 +790,37 @@ class SqliteStore(Store):
     def sessions(self) -> list[SessionInfo]:
         with self._connect() as db:
             rows = db.execute(
-                "SELECT session, COUNT(*), SUM(tokens), MIN(at), MAX(at)"
-                " FROM turns GROUP BY session ORDER BY MAX(at) DESC"
+                "SELECT t.session, COUNT(*), SUM(t.tokens), MIN(t.at), MAX(t.at),"
+                "  (SELECT content FROM turns f WHERE f.session = t.session"
+                "     AND f.role = 'user' ORDER BY f.id LIMIT 1)"
+                " FROM turns t GROUP BY t.session ORDER BY MAX(t.at) DESC"
             ).fetchall()
         return [
             SessionInfo(name=row[0], turns=int(row[1] or 0), tokens=int(row[2] or 0),
-                        started=row[3] or "", updated=row[4] or "")
+                        started=row[3] or "", updated=row[4] or "", first=row[5] or "")
             for row in rows
         ]
+
+    def rename(self, session: str, new_name: str) -> bool:
+        if not new_name or new_name == session:
+            return False
+        with self._connect() as db:
+            занято = db.execute(
+                "SELECT 1 FROM turns WHERE session = ? LIMIT 1", (new_name,)
+            ).fetchone()
+            если_есть = db.execute(
+                "SELECT 1 FROM turns WHERE session = ? LIMIT 1", (session,)
+            ).fetchone()
+            if занято or not если_есть:
+                return False
+            # Три таблицы одной транзакцией: реплики, факты, пересказ.
+            db.execute("UPDATE turns SET session = ? WHERE session = ?",
+                       (new_name, session))
+            db.execute("UPDATE facts SET session = ? WHERE session = ?",
+                       (new_name, session))
+            db.execute("UPDATE summaries SET session = ? WHERE session = ?",
+                       (new_name, session))
+        return True
 
     def clear(self, session: str) -> None:
         with self._connect() as db:
@@ -706,6 +897,40 @@ class SqliteStore(Store):
             cur = db.execute("DELETE FROM longterm WHERE key = ?", (key,))
             return cur.rowcount > 0
 
+    ПРОФИЛЬ_ПОЛЯ = ("name", "tone", "format", "level", "constraints",
+                    "language", "extra")
+
+    def save_profile(self, profile: Profile) -> None:
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO profiles (name, tone, format, level, constraints,"
+                " language, extra) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(name) DO UPDATE SET tone = excluded.tone,"
+                "   format = excluded.format, level = excluded.level,"
+                "   constraints = excluded.constraints,"
+                "   language = excluded.language, extra = excluded.extra",
+                tuple(getattr(profile, поле) for поле in self.ПРОФИЛЬ_ПОЛЯ),
+            )
+
+    def load_profile(self, name: str) -> Profile | None:
+        with self._connect() as db:
+            row = db.execute(
+                f"SELECT {', '.join(self.ПРОФИЛЬ_ПОЛЯ)} FROM profiles WHERE name = ?",
+                (name,)).fetchone()
+        return Profile(*row) if row else None
+
+    def profiles(self) -> list[Profile]:
+        with self._connect() as db:
+            rows = db.execute(
+                f"SELECT {', '.join(self.ПРОФИЛЬ_ПОЛЯ)} FROM profiles ORDER BY name"
+            ).fetchall()
+        return [Profile(*row) for row in rows]
+
+    def delete_profile(self, name: str) -> bool:
+        with self._connect() as db:
+            return db.execute("DELETE FROM profiles WHERE name = ?",
+                              (name,)).rowcount > 0
+
     # ── внутреннее ──────────────────────────────────────────────────────
     @contextmanager
     def _connect(self):
@@ -740,16 +965,20 @@ def open_store(kind: str = "sqlite", location: Path | str | None = None) -> Stor
 
 
 def _safe_name(session: str) -> str:
-    """Имя сессии → имя файла. Кириллица проходит как есть, мусор — нет."""
+    """Имя сессии → имя файла. Кириллица проходит как есть, мусор — нет.
+
+    Ведущее подчёркивание срезается: файлы с ним считаются служебными
+    (_longterm.json, _profiles.json) и в список диалогов не попадают.
+    """
     cleaned = "".join(
         char if (char.isalnum() or char in "-_") else "-"
         for char in session.strip()
-    ).strip("-")
+    ).strip("-").lstrip("_")
     return cleaned or DEFAULT_SESSION
 
 
 __all__ = ["Store", "JsonStore", "SqliteStore", "Turn", "SessionInfo", "Totals",
-           "Summary", "Fact", "Memo", "open_store", "default_dir", "now_iso",
+           "Summary", "Fact", "Memo", "Profile", "open_store", "default_dir", "now_iso",
            "local_time", "DEFAULT_SESSION", "ENV_DIR_VAR", "MemoryError_",
            "SHORT", "WORKING", "LONG", "LAYERS",
            "PROFILE", "DECISION", "KNOWLEDGE", "LONG_KINDS"]

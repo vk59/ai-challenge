@@ -3,23 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ассистент — память и профиль</title>
+<title>Персонализированный ассистент</title>
 <style>
-  :root {
-    --chrome:rgba(246,246,246,.72); --canvas:#fff; --text:#1d1d1f; --muted:#86868b;
-    --bubble:#e9e9eb; --field:#fff; --border:rgba(0,0,0,.12);
-    --hairline:rgba(0,0,0,.08); --accent:#007aff; --code-bg:rgba(0,0,0,.05);
-    --danger:#d70015; --danger-bg:rgba(215,0,21,.10); --sidebar:rgba(240,240,242,.86);
-    --short:#ff9f0a; --working:#30b0c7; --long:#bf5af2; --profile:#34c759;
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --bubble:#e9e9eb;--field:#fff;--border:rgba(0,0,0,.12);
+    --hairline:rgba(0,0,0,.08);--accent:#007aff;--code-bg:rgba(0,0,0,.05);
+    --danger:#d70015;--danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --short:#ff9f0a;--working:#30b0c7;--long:#bf5af2;--profile:#34c759;
     --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
     --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
   }
   @media (prefers-color-scheme:dark){:root{
-    --chrome:rgba(58,58,60,.72); --canvas:#1e1e1e; --text:#f5f5f7; --muted:#98989d;
-    --bubble:#3a3a3c; --field:#2c2c2e; --border:rgba(255,255,255,.14);
-    --hairline:rgba(255,255,255,.10); --accent:#0a84ff; --code-bg:rgba(255,255,255,.07);
-    --danger:#ff6961; --danger-bg:rgba(255,105,97,.12); --sidebar:rgba(36,36,38,.86);
-    --short:#ffb340; --working:#40c8e0; --long:#da8fff; --profile:#30d158;
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --bubble:#3a3a3c;--field:#2c2c2e;--border:rgba(255,255,255,.14);
+    --hairline:rgba(255,255,255,.10);--accent:#0a84ff;--code-bg:rgba(255,255,255,.07);
+    --danger:#ff6961;--danger-bg:rgba(255,105,97,.12);--sidebar:rgba(36,36,38,.86);
+    --short:#ffb340;--working:#40c8e0;--long:#da8fff;--profile:#30d158;
     --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
     --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
   *,*::before,*::after{box-sizing:border-box}
@@ -30,7 +30,7 @@
     -webkit-font-smoothing:antialiased}
   .window{width:min(100%,1180px);height:min(100%,760px);display:flex;
     flex-direction:column;background:var(--canvas);border-radius:12px;
-    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden;position:relative}
   .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
     gap:7px;padding:0 13px;background:var(--chrome);
     -webkit-backdrop-filter:saturate(180%) blur(24px);
@@ -47,11 +47,10 @@
     cursor:pointer;white-space:nowrap}
   .btn:active:not(:disabled){background:var(--bubble)}
   .btn:disabled{opacity:.4;cursor:default}
+  .btn.primary{background:var(--profile);border-color:transparent;color:#fff}
 
   .body{flex:1;min-height:0;display:flex}
-
-  /* ── сайдбар чатов ─────────────────────────────────────────────── */
-  .chats{flex:none;width:206px;background:var(--sidebar);
+  .chats{flex:none;width:200px;background:var(--sidebar);
     border-right:.5px solid var(--hairline);display:flex;flex-direction:column}
   .chats header{flex:none;display:flex;align-items:center;gap:6px;
     padding:9px 10px 7px;font-size:11px;color:var(--muted);font-weight:600;
@@ -105,7 +104,7 @@
     animation:bounce 1.25s ease-in-out infinite}
   .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
   @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
-  .empty{margin:auto;text-align:center;max-width:430px;color:var(--muted)}
+  .empty{margin:auto;text-align:center;max-width:440px;color:var(--muted)}
   .empty .glyph{font-size:27px;opacity:.5}
   .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
   .empty p{margin:0;font-size:12.5px}
@@ -124,8 +123,7 @@
     color:#fff;background:var(--accent);border:0;border-radius:50%;cursor:pointer}
   .send:disabled{background:var(--bubble);color:var(--muted);cursor:default}
 
-  /* ── правая колонка: профиль + память ──────────────────────────── */
-  .side{flex:none;width:312px;border-left:.5px solid var(--hairline);
+  .side{flex:none;width:306px;border-left:.5px solid var(--hairline);
     background:var(--chrome);display:flex;flex-direction:column;overflow-y:auto}
   .layer{border-bottom:.5px solid var(--hairline);padding:10px 12px}
   .layer h3{margin:0 0 2px;font-size:11.5px;font-weight:650;display:flex;
@@ -180,10 +178,43 @@
     border-top:.5px solid var(--hairline)}
   .statusbar b{color:var(--text);font-weight:600}
 
+  /* ── сравнение профилей: главное в этом дне ────────────────────── */
+  .overlay{position:absolute;inset:0;background:var(--canvas);display:none;
+    flex-direction:column;z-index:20}
+  .overlay.on{display:flex}
+  .overlay header{flex:none;display:flex;align-items:center;gap:9px;padding:11px 14px;
+    border-bottom:.5px solid var(--hairline);background:var(--chrome)}
+  .overlay header b{font-size:13px}
+  .overlay header .q{flex:1;min-width:0;font-size:12px;color:var(--muted);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cols{flex:1;min-height:0;overflow-x:auto;display:flex;gap:11px;padding:13px}
+  .col{flex:0 0 300px;display:flex;flex-direction:column;min-height:0;
+    border:.5px solid var(--border);border-radius:9px;overflow:hidden;
+    background:var(--field)}
+  .col h4{margin:0;padding:8px 11px;font-size:12px;font-weight:650;
+    background:var(--chrome);border-bottom:.5px solid var(--hairline);
+    display:flex;align-items:center;gap:6px}
+  .col h4 .dot{width:7px;height:7px;border-radius:50%;background:var(--profile);flex:none}
+  .col h4.plain .dot{background:var(--muted)}
+  .col .prefsbox{padding:6px 11px;font-size:10.5px;color:var(--muted);
+    border-bottom:.5px solid var(--hairline);white-space:pre-wrap;max-height:86px;
+    overflow-y:auto}
+  .col .answer{flex:1;min-height:0;overflow-y:auto;padding:10px 11px;font-size:12.5px}
+  .col .answer pre{background:var(--code-bg);padding:8px;border-radius:7px;
+    overflow-x:auto;margin:.4em 0}
+  .col .answer code{font:11.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;
+    background:var(--code-bg);padding:.1em .3em;border-radius:4px}
+  .col .answer pre code{background:none;padding:0}
+  .col .answer ul,.col .answer ol{margin:.4em 0;padding-left:1.2em}
+  .col footer{flex:none;padding:6px 11px;font-size:10.5px;color:var(--muted);
+    border-top:.5px solid var(--hairline);background:var(--chrome)}
+
   .native body{display:block;padding:0;background:var(--canvas)}
   .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
   .native .titlebar{display:none}
-  @media (max-width:1000px){.side{width:264px}.chats{width:176px}}
+  .native .statusbar .native-actions{display:flex;gap:6px;margin-left:auto}
+  .statusbar .native-actions{display:none}
+  @media (max-width:1000px){.side{width:262px}.chats{width:172px}}
 </style>
 </head>
 <body>
@@ -192,11 +223,12 @@
   <header class="titlebar">
     <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
     <div class="titles"><b id="chatTitle">Ассистент</b><span id="subtitle">—</span></div>
+    <button class="btn primary" id="compareBtn">Сравнить профили</button>
   </header>
 
   <div class="body">
     <nav class="chats">
-      <header>Чаты <button id="newChat" title="Новый чат">+</button></header>
+      <header>Чаты <button id="newChatBtn" title="Новый чат">+</button></header>
       <div class="chatlist" id="chatList"></div>
     </nav>
 
@@ -266,21 +298,33 @@
     <span>запрос <b id="weigh">0</b></span>
     <span>из них профиль <b id="wprof">0</b></span>
     <span>всего <b id="tokens">0</b></span>
-    <span>служебных <b id="overhead">0</b></span>
     <span>потрачено <b id="spent">—</b></span>
+    <span class="native-actions">
+      <button class="btn" id="newChatNative">Новый чат</button>
+      <button class="btn primary" id="compareNative">Сравнить профили</button>
+    </span>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <header>
+      <b>Один вопрос — разные профили</b>
+      <span class="q" id="cmpQuestion"></span>
+      <button class="btn" id="cmpClose">Закрыть</button>
+    </header>
+    <div class="cols" id="cmpCols"></div>
   </div>
 </div>
 
 <template id="emptyTpl">
   <div class="empty">
-    <div class="glyph">◱</div>
-    <h2>Память и профиль</h2>
-    <p>Слева — чаты, справа — что агент про вас знает и как с вами говорит.
-       Профиль меняет форму ответа, память — его содержание.</p>
+    <div class="glyph">◐</div>
+    <h2>Персонализация</h2>
+    <p>Справа выберите профиль — он меняет форму ответа, не меняя вопроса.
+       Кнопка «Сравнить профили» задаёт один вопрос всем профилям сразу.</p>
     <div class="chips">
-      <button class="chip">Меня зовут Иван, пишу на Python</button>
-      <button class="chip">Бюджет 800 тысяч, срок 3 месяца</button>
       <button class="chip">Как хранить пароли пользователей?</button>
+      <button class="chip">Что такое индекс в базе данных?</button>
+      <button class="chip">Меня зовут Иван, пишу на Python</button>
     </div>
   </div>
 </template>
@@ -354,8 +398,6 @@ function renderChats(){
     list.append(d);
   }
 }
-
-/* Переименование по двойному клику — правим заголовок прямо в списке. */
 function startRename(el,c){
   const info=el.querySelector('.info');
   const было=info.innerHTML;
@@ -372,7 +414,6 @@ function startRename(el,c){
   inp.onkeydown=e=>{if(e.key==='Enter')конец(true);if(e.key==='Escape')конец(false);};
   inp.onblur=()=>конец(true);
 }
-
 async function openChat(имя){
   const d=await post('/session',{session:имя});
   if(!d)return;
@@ -384,9 +425,11 @@ async function newChat(){
   while(занятые.has(имя))имя='чат-'+(++n);
   await openChat(имя);
 }
-window.newConversation=newChat;
+window.newChat=newChat;
 
 /* ── профиль ─────────────────────────────────────────────────────── */
+const ПОДПИСИ={tone:'тон',format:'формат',level:'уровень',
+               language:'язык',constraints:'ограничения'};
 function renderProfile(){
   const sel=$('#profileSel');sel.replaceChildren();
   const пусто=document.createElement('option');
@@ -398,22 +441,20 @@ function renderProfile(){
     sel.append(o);
   }
   const box=$('#prefs');box.replaceChildren();
-  const активный=(state.profiles||[]).find(p=>p.name===state.profile);
-  const ПОДПИСИ={tone:'тон',format:'формат',level:'уровень',
-                 language:'язык',constraints:'ограничения'};
-  if(!активный){
+  const акт=(state.profiles||[]).find(p=>p.name===state.profile);
+  if(!акт){
     box.append(Object.assign(document.createElement('div'),
       {className:'nothing',textContent:'профиль не выбран — агент отвечает как всем'}));
     return;
   }
   let было=false;
   for(const ключ of ['tone','format','level','language','constraints']){
-    if(!активный[ключ])continue;
+    if(!акт[ключ])continue;
     было=true;
     const d=document.createElement('div');d.className='pref';
     d.innerHTML='<b></b><span></span>';
     d.firstElementChild.textContent=ПОДПИСИ[ключ];
-    d.children[1].textContent=активный[ключ];
+    d.children[1].textContent=акт[ключ];
     box.append(d);
   }
   if(!было)box.append(Object.assign(document.createElement('div'),
@@ -431,7 +472,6 @@ function item(k,v,onX,fresh){
   return d;
 }
 const ВИДЫ={profile:'профиль',decision:'решения',knowledge:'знания'};
-
 function renderLayers(){
   const L=state.layers||{},s=L.short||{},w=L.working||{},l=L.long||{};
   $('#shortCount').textContent=(s['в окне']??0)+'/'+(s['потолок']??0);
@@ -443,7 +483,7 @@ function renderLayers(){
     const d=document.createElement('div');d.className='turn';
     d.innerHTML='<b></b> ';
     d.firstElementChild.textContent=r.role==='user'?'вы:':'агент:';
-    d.append(r.content.slice(0,64));si.append(d);
+    d.append(r.content.slice(0,62));si.append(d);
   }
   const wi=$('#workItems');wi.replaceChildren();
   if(!(w.items||[]).length)wi.append(Object.assign(document.createElement('div'),
@@ -476,7 +516,6 @@ function apply(next){
   $('#subtitle').textContent=(state.profile?'профиль: '+state.profile+' · ':'')
     +(state.model||'');
   $('#tokens').textContent=(state.tokens||0).toLocaleString('ru');
-  $('#overhead').textContent=(state.overhead||0).toLocaleString('ru');
   $('#spent').textContent=state.spent||'—';
   if(state.weigh){
     $('#weigh').textContent=(state.weigh.total||0).toLocaleString('ru');
@@ -495,6 +534,7 @@ function renderHistory(h){
   transcript.scrollTop=transcript.scrollHeight;
 }
 
+/* ── обычная отправка ────────────────────────────────────────────── */
 async function send(){
   const message=promptEl.value.trim();
   if(!message||busy)return;
@@ -522,6 +562,7 @@ async function send(){
           свежие=m.новое||{working:[],long:[]};
           apply(m);
           const биты=[];
+          if(state.profile)биты.push('профиль «'+state.profile+'»');
           if(свежие.working.length)биты.push('рабочая +'+свежие.working.length);
           if(свежие.long.length)биты.push('долговременная +'+свежие.long.length);
           if(биты.length){
@@ -539,6 +580,71 @@ async function send(){
   }finally{busy=false;sync();scroll();promptEl.focus();}
 }
 
+/* ── сравнение профилей ──────────────────────────────────────────── */
+let сравнение=false;
+async function startCompare(){
+  if(сравнение)return;
+  const вопрос=(promptEl.value.trim()
+    ||(state.history||[]).filter(t=>t.role==='user').slice(-1)[0]?.content
+    ||'').trim();
+  if(!вопрос){
+    alert('Напишите вопрос в поле ввода — он уйдёт всем профилям сразу.');
+    promptEl.focus();return;
+  }
+  сравнение=true;
+  $('#cmpQuestion').textContent='«'+вопрос+'»';
+  const cols=$('#cmpCols');cols.replaceChildren();
+  $('#overlay').classList.add('on');
+
+  const колонки={};
+  const создать=(имя,prefs)=>{
+    const c=document.createElement('div');c.className='col';
+    c.innerHTML='<h4'+(prefs?'':' class="plain"')+'><span class="dot"></span></h4>'
+      +(prefs?'<div class="prefsbox"></div>':'')
+      +'<div class="answer"><div class="dots"><i></i><i></i><i></i></div></div>'
+      +'<footer>…</footer>';
+    c.querySelector('h4').append(имя);
+    if(prefs)c.querySelector('.prefsbox').textContent=prefs;
+    cols.append(c);
+    колонки[имя]={el:c,текст:''};
+    return колонки[имя];
+  };
+
+  try{
+    const res=await fetch('/compare',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:вопрос})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const {value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.start){создать(m.start,m.prefs||'');continue;}
+        if(m.done){apply(m);continue;}
+        const к=колонки[m.name];
+        if(!к)continue;
+        if(m.error){
+          к.el.querySelector('.answer').textContent='Ошибка: '+m.error;continue;}
+        if(m.delta){
+          к.текст+=m.delta;
+          к.el.querySelector('.answer').innerHTML=md(к.текст);
+          continue;}
+        if(m.end){
+          к.el.querySelector('footer').textContent=
+            m.chars+' знаков · '+m.tokens+' токенов · код: '+(m.code?'да':'нет');
+        }
+      }
+    }
+  }catch(err){
+    alert('Сравнение не удалось: '+(err.message||err));
+  }finally{сравнение=false;}
+}
+window.startCompare=startCompare;
+
 function sync(){sendEl.disabled=busy||!promptEl.value.trim();}
 function grow(){promptEl.style.height='auto';
   promptEl.style.height=promptEl.scrollHeight+'px';}
@@ -547,7 +653,11 @@ promptEl.addEventListener('input',()=>{grow();sync();});
 promptEl.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
 sendEl.addEventListener('click',send);
-$('#newChat').addEventListener('click',newChat);
+$('#newChatBtn').addEventListener('click',newChat);
+$('#newChatNative').addEventListener('click',newChat);
+$('#compareBtn').addEventListener('click',startCompare);
+$('#compareNative').addEventListener('click',startCompare);
+$('#cmpClose').addEventListener('click',()=>$('#overlay').classList.remove('on'));
 
 $('#profileSel').addEventListener('change',async e=>{
   const d=await post('/profile/use',{name:e.target.value});if(d)apply(d);});
@@ -561,9 +671,9 @@ $('#pSave').addEventListener('click',async()=>{
   const d=await post('/profile/save',{name:имя,tone:$('#pTone').value,
     format:$('#pFormat').value,level:$('#pLevel').value,
     constraints:$('#pConstr').value});
-  if(d){for(const id of ['pName','pTone','pFormat','pLevel','pConstr'])$('#'+id).value='';
-    await post('/profile/use',{name:имя});
-    const s=await fetch('/state').then(r=>r.json());apply(s);}
+  if(!d)return;
+  for(const id of ['pName','pTone','pFormat','pLevel','pConstr'])$('#'+id).value='';
+  const p=await post('/profile/use',{name:имя});if(p)apply(p);
 });
 
 $('#wAdd').addEventListener('click',async()=>{
@@ -579,7 +689,7 @@ $('#lAdd').addEventListener('click',async()=>{
 
 transcript.addEventListener('click',e=>{
   const c=e.target.closest('.chip');if(!c)return;
-  promptEl.value=c.textContent;grow();send();});
+  promptEl.value=c.textContent;grow();sync();});
 
 fetch('/state').then(r=>r.json())
   .then(d=>{apply(d);renderHistory(d.history);})

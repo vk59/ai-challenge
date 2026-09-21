@@ -27,8 +27,8 @@ import json as _json
 
 from llm import LLMError, Provider, ask, ask_stream
 from memory import (DECISION, DEFAULT_SESSION, KNOWLEDGE, LONG, LONG_KINDS,
-                    PROFILE, SHORT, WORKING, Fact, Memo, Store, Summary, Turn,
-                    now_iso)
+                    PROFILE, SHORT, WORKING, Fact, Memo, Profile, Store, Summary,
+                    Turn, now_iso)
 from tokens import cost, estimate_request, limit_of, money
 
 # Стратегии управления контекстом (день 10).
@@ -247,6 +247,11 @@ class Agent:
         self.memos: list[Memo] = []
         self.layered = False        # включает раскладку по слоям при ответе
 
+        # День 12: профиль — это не память, а настройка. Память агент
+        # набирает сам, профиль задаётся сознательно и меняется одним
+        # переключением, в том числе посреди разговора.
+        self.profile: Profile | None = None
+
         self._history: list[dict] = []
         self.stats = Stats()
         self.journal: list[Call] = []
@@ -351,15 +356,18 @@ class Agent:
                    if self.summary and self.summary.content else 0)
         facts = sum(estimate_text(f"- {f.key}: {f.value}") for f in self.facts)
         memos = sum(estimate_text(f"- {m.key}: {m.value}") for m in self.memos)
+        profile = estimate_text(self.profile.as_prompt()) if self.profile else 0
         history = sum(estimate_text(item.get("content", "")) + MESSAGE_OVERHEAD
                       for item in self._history)
         question = estimate_text(message)
-        total = REQUEST_OVERHEAD + role + summary + facts + memos + history + question
+        total = (REQUEST_OVERHEAD + role + profile + summary + facts + memos
+                 + history + question)
 
         limit = limit_of(self.model)
         return {
             "overhead": REQUEST_OVERHEAD,
             "role": role,
+            "profile": profile,
             "summary": summary,
             "facts": facts,
             "memos": memos,
@@ -451,6 +459,13 @@ class Agent:
         справка о том, что было раньше.
         """
         куски = [self.role]
+        # Профиль идёт сразу за ролью, ПЕРЕД всякой памятью: это указания
+        # о форме ответа, и они должны действовать независимо от того,
+        # что агент успел запомнить.
+        if self.profile:
+            блок = self.profile.as_prompt()
+            if блок:
+                куски.append(блок)
         if self.summary and self.summary.content:
             куски.append("[Ранее в этом диалоге, сжатый пересказ]\n"
                          + self.summary.content)
@@ -674,6 +689,71 @@ class Agent:
     def branches(self) -> list[str]:
         """Все сохранённые диалоги — ветки среди них живут на равных."""
         return [s.name for s in self.store.sessions()] if self.store else []
+
+    def chats(self) -> list[dict]:
+        """Список диалогов для интерфейса: с заголовком и размером.
+
+        Заголовок берётся из первой реплики пользователя. Имя сессии —
+        это идентификатор, а человеку нужен смысл: «диалог-3» ничего
+        не говорит, «Собираем ТЗ на склад» — говорит.
+        """
+        if not self.store:
+            return []
+        найдено = [
+            {"name": s.name, "title": s.title, "pairs": s.pairs,
+             "updated": s.when, "active": s.name == self.session}
+            for s in self.store.sessions()
+        ]
+        # Текущий диалог может быть ещё пустым — в sessions() его нет,
+        # потому что там нет ни одной реплики. Но в списке он обязан быть,
+        # иначе после создания чат пропадает с глаз до первой реплики.
+        if not any(c["name"] == self.session for c in найдено):
+            найдено.insert(0, {"name": self.session, "title": self.session,
+                               "pairs": 0, "updated": "", "active": True})
+        return найдено
+
+    # ── персонализация (день 12) ────────────────────────────────────────
+    def use_profile(self, name: str | None) -> bool:
+        """Включить профиль по имени; None — снять персонализацию."""
+        if name is None:
+            self.profile = None
+            return True
+        if not self.store:
+            return False
+        найден = self.store.load_profile(name)
+        if найден is None:
+            return False
+        self.profile = найден
+        return True
+
+    def save_profile(self, profile: Profile, *, activate: bool = True) -> None:
+        """Создать или обновить профиль."""
+        if self.store:
+            self.store.save_profile(profile)
+        if activate:
+            self.profile = profile
+
+    def profiles(self) -> list[Profile]:
+        return self.store.profiles() if self.store else []
+
+    def rename(self, new_name: str) -> bool:
+        """Переименовать текущий диалог и остаться в нём."""
+        new_name = (new_name or "").strip()
+        if not self.store or not new_name or new_name == self.session:
+            return False
+        if not self.store.rename(self.session, new_name):
+            return False
+        self.session = new_name
+        return True
+
+    def drop(self, session: str) -> None:
+        """Удалить диалог целиком. Если удаляем текущий — уходим в другой."""
+        if not self.store:
+            return
+        self.store.clear(session)
+        if session == self.session:
+            остальные = [s.name for s in self.store.sessions()]
+            self.switch(остальные[0] if остальные else DEFAULT_SESSION)
 
     def _compress(self, doomed: list[dict]) -> None:
         """Сворачивает пачку вытесненных пар в пересказ.
