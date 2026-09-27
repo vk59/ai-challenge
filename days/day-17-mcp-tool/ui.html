@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Летописец — агент с MCP-инструментами</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --bubble:#e9e9eb;--field:#fff;--border:rgba(0,0,0,.12);
+    --hairline:rgba(0,0,0,.08);--accent:#007aff;--code-bg:rgba(0,0,0,.05);
+    --danger:#d70015;--danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --tool:#5e5ce6;--tool-bg:rgba(94,92,230,.10);--ok:#34c759;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --bubble:#3a3a3c;--field:#2c2c2e;--border:rgba(255,255,255,.14);
+    --hairline:rgba(255,255,255,.10);--accent:#0a84ff;--code-bg:rgba(255,255,255,.07);
+    --danger:#ff6961;--danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --tool:#7d7aff;--tool-bg:rgba(125,122,255,.14);--ok:#30d158;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:22px 16px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1120px);height:min(100%,760px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:23px;padding:0 10px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn:active:not(:disabled){background:var(--bubble)}
+
+  .body{flex:1;min-height:0;display:flex}
+  .chat-area{flex:1;min-width:0;display:flex;flex-direction:column}
+  .transcript{flex:1;min-height:0;overflow-y:auto;padding:17px;
+    display:flex;flex-direction:column;gap:10px}
+  .msg{display:flex;flex-direction:column}
+  .msg.me{align-items:flex-end}.msg.bot{align-items:flex-start}
+  .bubble{max-width:86%;padding:8px 13px;border-radius:17px;overflow-wrap:anywhere}
+  .me .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:5px;
+    white-space:pre-wrap}
+  .bot .bubble{background:var(--bubble);border-bottom-left-radius:5px}
+  .bot .bubble.error{background:var(--danger-bg);color:var(--danger)}
+  .bubble p{margin:.5em 0}.bubble>:first-child{margin-top:0}
+  .bubble>:last-child{margin-bottom:0}
+  .bubble ul,.bubble ol{margin:.5em 0;padding-left:1.3em}
+  .bubble code{font:12px/1.4 ui-monospace,"SF Mono",Menlo,monospace;
+    background:var(--code-bg);padding:.1em .3em;border-radius:4px}
+  .bubble pre{margin:.5em 0;padding:9px 11px;background:var(--code-bg);
+    border-radius:8px;overflow-x:auto}
+  .bubble pre code{background:none;padding:0}
+
+  /* ── плашка вызова инструмента: главное в этом дне ─────────────── */
+  .call{max-width:86%;background:var(--tool-bg);
+    border:.5px solid color-mix(in srgb,var(--tool) 40%,transparent);
+    border-radius:10px;padding:7px 11px;font-size:12px;
+    animation:появление .3s ease-out}
+  @keyframes появление{from{opacity:0;transform:translateY(5px)}to{opacity:1}}
+  .call.failed{background:var(--danger-bg);
+    border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+  .call .head{display:flex;align-items:center;gap:6px;font-weight:650;
+    color:var(--tool)}
+  .call.failed .head{color:var(--danger)}
+  .call .args{font:11.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;
+    color:var(--muted);margin-top:2px}
+  .call .prev{margin-top:5px;padding-top:5px;
+    border-top:.5px solid color-mix(in srgb,var(--tool) 22%,transparent);
+    font:11.5px/1.45 ui-monospace,"SF Mono",Menlo,monospace;
+    color:var(--text);opacity:.8;white-space:pre-wrap;overflow-wrap:anywhere}
+  .call .foot{margin-top:4px;font-size:10.5px;color:var(--muted)}
+  .thinking{font-size:12px;color:var(--muted);display:flex;gap:6px;
+    align-items:center}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+
+  .empty{margin:auto;text-align:center;max-width:470px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:13px}
+  .chip{font:inherit;font-size:12px;color:var(--text);background:var(--field);
+    border:.5px solid var(--border);border-radius:13px;padding:4px 11px;cursor:pointer}
+  .chip:hover{background:var(--bubble)}
+  .composer{flex:none;display:flex;align-items:flex-end;gap:8px;padding:10px 12px;
+    background:var(--chrome);border-top:.5px solid var(--hairline)}
+  .composer textarea{flex:1;resize:none;max-height:118px;padding:7px 12px;font:inherit;
+    color:var(--text);background:var(--field);border:.5px solid var(--border);
+    border-radius:16px;outline:none}
+  .composer textarea:focus{border-color:var(--accent);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 28%,transparent)}
+  .send{flex:none;width:30px;height:30px;display:grid;place-items:center;font-size:15px;
+    color:#fff;background:var(--accent);border:0;border-radius:50%;cursor:pointer}
+  .send:disabled{background:var(--bubble);color:var(--muted);cursor:default}
+
+  .side{flex:none;width:268px;border-left:.5px solid var(--hairline);
+    background:var(--chrome);display:flex;flex-direction:column;overflow-y:auto}
+  .side header{flex:none;padding:10px 12px 6px;font-size:11px;color:var(--muted);
+    font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .side .mcp{padding:0 12px 9px;font-size:11px;color:var(--muted)}
+  .side .mcp b{color:var(--ok)}
+  .tool{margin:0 9px 5px;padding:7px 9px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;font-size:11.5px}
+  .tool .n{font-weight:650;color:var(--tool);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .tool .d{color:var(--muted);margin-top:2px;font-size:11px}
+  .tool .p{margin-top:3px;font-size:10.5px;color:var(--muted);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:980px){.side{width:228px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b>Летописец</b><span id="subtitle">—</span></div>
+    <button class="btn" id="resetBtn">Новый диалог</button>
+  </header>
+
+  <div class="body">
+    <div class="chat-area">
+      <div class="transcript" id="transcript"></div>
+      <footer class="composer">
+        <textarea id="prompt" rows="1" placeholder="Спросите про дни, файлы, историю…" autofocus></textarea>
+        <button class="send" id="send" disabled title="Отправить (Enter)">↑</button>
+      </footer>
+    </div>
+
+    <aside class="side">
+      <header>Инструменты MCP</header>
+      <div class="mcp" id="mcpLine">—</div>
+      <div id="toolList"></div>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span>модель <b id="model">—</b></span>
+    <span>вызовов за сессию <b id="calls">0</b></span>
+    <span>токенов <b id="tokens">0</b></span>
+    <span>потрачено <b id="spent">—</b></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">🔧</div>
+    <h2>Агент с инструментами</h2>
+    <p>Справа — инструменты, которые агент получил от MCP-сервера.
+       Он сам решает, какой вызвать. Каждый вызов будет виден в ленте
+       отдельной плашкой: что дёрнули и что вернулось.</p>
+    <div class="chips">
+      <button class="chip">Что я делал в девятый день?</button>
+      <button class="chip">Когда появилось сжатие истории?</button>
+      <button class="chip">Сколько коммитов и строк в проекте?</button>
+      <button class="chip">Как часто менялся shared/agent.py?</button>
+    </div>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const transcript=$('#transcript'),promptEl=$('#prompt'),sendEl=$('#send');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+function md(src){
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  if(((src.match(/```/g)||[]).length)%2) src+='\n```';
+  const blocks=[];
+  src=src.replace(/```[a-zA-Z0-9+#.-]*\n?([\s\S]*?)```/g,(_,b)=>{
+    blocks.push('<pre><code>'+esc(b.replace(/\n+$/,''))+'</code></pre>');
+    return '\n@@C'+(blocks.length-1)+'@@\n';});
+  const inl=s=>esc(s).replace(/`([^`\n]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
+  const out=[];let list=null;
+  const close=()=>{if(list){out.push('</'+list+'>');list=null;}};
+  for(const raw of src.split('\n')){
+    const l=raw.trim();const p=l.match(/^@@C(\d+)@@$/);
+    if(p){close();out.push(blocks[+p[1]]);continue;}
+    if(!l){close();continue;}
+    const b=l.match(/^[-*•]\s+(.*)$/),n=l.match(/^\d+[.)]\s+(.*)$/);
+    if(b||n){const w=b?'ul':'ol';if(list!==w){close();out.push('<'+w+'>');list=w;}
+      out.push('<li>'+inl((b||n)[1])+'</li>');continue;}
+    close();out.push('<p>'+inl(l)+'</p>');
+  }
+  close();return out.join('');
+}
+function showEmpty(){transcript.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function addMsg(who){
+  const e=$('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className='msg '+who;
+  d.innerHTML='<div class="bubble"></div>';transcript.append(d);
+  return d.firstElementChild;
+}
+const scroll=()=>transcript.scrollTo({top:transcript.scrollHeight,behavior:'smooth'});
+
+/* Плашка вызова инструмента — ради неё всё и затевалось. */
+function addCall(t){
+  const e=$('.empty');if(e)e.remove();
+  const d=document.createElement('div');
+  d.className='call'+(t.failed?' failed':'');
+  d.innerHTML='<div class="head"><span>🔧</span><span class="nm"></span></div>'
+    +'<div class="args"></div><div class="prev"></div><div class="foot"></div>';
+  d.querySelector('.nm').textContent=t.name+(t.failed?' — ошибка':'');
+  const пары=Object.entries(t.args||{});
+  d.querySelector('.args').textContent=пары.length
+    ? пары.map(([k,v])=>k+': '+JSON.stringify(v)).join(', ')
+    : 'без аргументов';
+  const пред=(t.preview||[]).join('\n');
+  const prev=d.querySelector('.prev');
+  if(пред)prev.textContent=пред; else prev.remove();
+  d.querySelector('.foot').textContent=
+    `${t.lines} строк · ${t.chars} знаков · ${t.seconds} с`;
+  transcript.append(d);scroll();
+}
+
+function renderTools(){
+  const box=$('#toolList');box.replaceChildren();
+  $('#mcpLine').innerHTML='подключено: <b>'+(state.mcp||'—')+'</b>';
+  for(const t of state.tools||[]){
+    const d=document.createElement('div');d.className='tool';
+    d.innerHTML='<div class="n"></div><div class="d"></div><div class="p"></div>';
+    d.querySelector('.n').textContent=t.name;
+    d.querySelector('.d').textContent=(t.description||'').slice(0,90);
+    const p=d.querySelector('.p');
+    if((t.params||[]).length)p.textContent='('+t.params.join(', ')+')';
+    else p.textContent='(без параметров)';
+    box.append(d);
+  }
+}
+
+function apply(next){
+  if(!next)return;
+  state={...state,...next};
+  $('#model').textContent=state.model||'—';
+  $('#subtitle').textContent=state.mcp||'';
+  $('#calls').textContent=state.calls_total||0;
+  $('#tokens').textContent=(state.tokens||0).toLocaleString('ru');
+  $('#spent').textContent=state.spent||'—';
+  renderTools();
+}
+
+function renderHistory(h){
+  transcript.replaceChildren();
+  if(!h||!h.length){showEmpty();return;}
+  for(const t of h){
+    const b=addMsg(t.role==='user'?'me':'bot');
+    if(t.role==='user')b.textContent=t.content;else b.innerHTML=md(t.content);
+  }
+  transcript.scrollTop=transcript.scrollHeight;
+}
+
+async function send(){
+  const message=promptEl.value.trim();
+  if(!message||busy)return;
+  busy=true;promptEl.value='';grow();sync();
+  addMsg('me').textContent=message;
+
+  const ждём=document.createElement('div');
+  ждём.className='thinking';
+  ждём.innerHTML='<div class="dots"><i></i><i></i><i></i></div><span>думает, '
+    +'какой инструмент нужен…</span>';
+  transcript.append(ждём);scroll();
+
+  try{
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    let первый=true;
+    for(;;){
+      const {value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){ждём.remove();
+          const b=addMsg('bot');b.classList.add('error');
+          b.textContent=m.error;break;}
+        if(m.tool){
+          if(первый){ждём.querySelector('span').textContent=
+            'вызывает инструменты…';первый=false;}
+          addCall(m.tool);
+        }
+        if(m.answer!==undefined){
+          ждём.remove();
+          addMsg('bot').innerHTML=md(m.answer||'(пустой ответ)');
+          scroll();
+        }
+        if(m.done)apply(m);
+      }
+    }
+    ждём.remove();
+  }catch(err){
+    ждём.remove();
+    const b=addMsg('bot');b.classList.add('error');
+    b.textContent=String(err.message||err);
+  }finally{busy=false;sync();scroll();promptEl.focus();}
+}
+
+function sync(){sendEl.disabled=busy||!promptEl.value.trim();}
+function grow(){promptEl.style.height='auto';
+  promptEl.style.height=promptEl.scrollHeight+'px';}
+promptEl.addEventListener('input',()=>{grow();sync();});
+promptEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+sendEl.addEventListener('click',send);
+$('#resetBtn').addEventListener('click',async()=>{
+  const r=await fetch('/reset',{method:'POST'});
+  const d=await r.json();apply(d);renderHistory(d.history);sync();});
+transcript.addEventListener('click',e=>{
+  const c=e.target.closest('.chip');if(!c)return;
+  promptEl.value=c.textContent;grow();send();});
+
+fetch('/state').then(r=>r.json())
+  .then(d=>{apply(d);renderHistory(d.history);})
+  .catch(()=>showEmpty());
+</script>
+</body>
+</html>

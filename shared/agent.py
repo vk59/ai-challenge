@@ -298,6 +298,17 @@ class Agent:
         self.task: TaskState | None = None
         self.tracking = False       # включает автослежение за этапом
 
+        # День 17: инструменты с MCP-серверов. Если набор передан, ask()
+        # идёт другим путём: модель может попросить вызов, мы его выполняем
+        # и возвращаем результат, пока она не сформулирует ответ.
+        self.tools = None           # MCPToolset или None
+        self.tool_log: list = []    # что вызывалось за последнюю реплику
+        # Колбэк на каждый выполненный вызов. Нужен интерфейсу: без него
+        # окно узнаёт обо всех вызовах разом в конце, и пока модель думает,
+        # там пусто. С ним видно каждый шаг по мере выполнения.
+        self.on_tool = None
+        self.max_tool_rounds = 4    # потолок кругов, защита от зацикливания
+
         # День 15: условия на рёбрах и права этапа. Выключены по умолчанию
         # НАМЕРЕННО. День 13 — уже сданная работа с тем же автоматом, и если
         # включить условия глобально, его переход «планирование → выполнение»
@@ -322,6 +333,9 @@ class Agent:
         message = message.strip()
         if not message:
             raise ValueError("Пустой вопрос")
+
+        if self.tools is not None:
+            return self._ask_with_tools(message)
 
         answer = ask(
             message,
@@ -787,6 +801,82 @@ class Agent:
             найдено.insert(0, {"name": self.session, "title": self.session,
                                "pairs": 0, "updated": "", "active": True})
         return найдено
+
+    # ── инструменты MCP (день 17) ───────────────────────────────────────
+    def _ask_with_tools(self, message: str) -> str:
+        """Разговор, в котором модель может звать инструменты.
+
+        Круг выглядит так:
+
+            → вопрос + описания инструментов
+            ← «вызови day_summary(day=9)»        finish_reason=tool_calls
+            → результат вызова, ролью tool
+            ← готовый ответ человеку             finish_reason=stop
+
+        Кругов может быть несколько: модель вправе вызвать инструмент,
+        посмотреть результат и позвать следующий. Потолок нужен обязательно —
+        без него пара неудачных вызовов закручивается в бесконечный цикл
+        за ваши деньги.
+        """
+        схемы = self.tools.schemas()
+        # Свой список сообщений: сюда лягут промежуточные реплики с вызовами,
+        # а в постоянную память агента попадёт только вопрос и финальный ответ.
+        разговор: list[dict] = list(self._history)
+        разговор.append({"role": "user", "content": message})
+
+        self.tool_log = []
+        потрачено_секунд = 0.0
+        вход = выход = 0
+
+        for круг in range(self.max_tool_rounds):
+            ответ = ask(
+                None,                       # вопрос уже лежит в разговоре
+                system=self._system(),
+                model=self.model,
+                history=разговор,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                provider=self.provider,
+                tools=схемы,
+            )
+            вход += ответ.prompt_tokens
+            выход += ответ.completion_tokens
+            потрачено_секунд += ответ.seconds
+
+            if not ответ.wants_tools:
+                self._remember(message, ответ.text, вход, выход,
+                               round(потрачено_секунд, 1))
+                return ответ.text
+
+            # Реплика модели с просьбой о вызовах должна попасть в разговор
+            # целиком: без неё следующий запрос будет ссылаться на вызовы,
+            # которых в истории нет, и API откажет.
+            разговор.append({"role": "assistant", "content": ответ.text or None,
+                             "tool_calls": ответ.tool_calls})
+
+            for вызов in ответ.tool_calls:
+                функция = вызов.get("function") or {}
+                запись = self.tools.call(функция.get("name", ""),
+                                         функция.get("arguments"))
+                self.tool_log.append(запись)
+                if self.on_tool is not None:
+                    # Сбой в интерфейсе не должен ронять разговор.
+                    try:
+                        self.on_tool(запись)
+                    except Exception:            # noqa: BLE001
+                        pass
+                разговор.append({
+                    "role": "tool",
+                    "tool_call_id": вызов.get("id", ""),
+                    "content": запись.result,
+                })
+
+        # Круги кончились, а модель всё просит инструменты. Честнее сказать
+        # это вслух, чем молча вернуть пустоту.
+        текст = ("Не уложился в отведённые круги вызовов инструментов. "
+                 f"Успел вызвать: {', '.join(з.name for з in self.tool_log)}.")
+        self._remember(message, текст, вход, выход, round(потрачено_секунд, 1))
+        return текст
 
     # ── инварианты (день 14) ────────────────────────────────────────────
     def _invariants_prompt(self) -> str:

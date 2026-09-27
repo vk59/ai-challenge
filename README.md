@@ -45,6 +45,7 @@
 | 14 | Инварианты | [days/day-14-invariants](days/day-14-invariants) | ✅ код готов, нужно видео |
 | 15 | Контролируемые переходы | [days/day-15-guarded-transitions](days/day-15-guarded-transitions) | ✅ код готов, нужно видео |
 | 16 | Подключение MCP | [days/day-16-mcp](days/day-16-mcp) | ✅ код готов, нужно видео |
+| 17 | Первый инструмент MCP | [days/day-17-mcp-tool](days/day-17-mcp-tool) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 

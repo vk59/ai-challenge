@@ -58,10 +58,18 @@ class Answer:
     """Ответ модели вместе со всем, что о нём рассказал API."""
 
     text: str
-    finish_reason: str          # stop | length | content_filter — почему генерация кончилась
+    finish_reason: str          # stop | length | content_filter | tool_calls
     model: str
     seconds: float
     usage: dict = field(default_factory=dict)
+    # День 17: модель может вместо текста попросить вызвать инструменты.
+    # Тогда text пустой, finish_reason == "tool_calls", а здесь лежит список
+    # запрошенных вызовов: [{"id", "function": {"name", "arguments"}}].
+    tool_calls: list = field(default_factory=list)
+
+    @property
+    def wants_tools(self) -> bool:
+        return bool(self.tool_calls)
 
     @property
     def completion_tokens(self) -> int:
@@ -102,7 +110,7 @@ def load_env(path: Path | None = None) -> None:
 
 
 def ask(
-    prompt: str,
+    prompt: str | None,
     *,
     system: str | None = None,
     model: str | None = None,
@@ -112,6 +120,7 @@ def ask(
     json_mode: bool = False,
     temperature: float | None = None,
     provider: Provider | None = None,
+    tools: list[dict] | None = None,
 ) -> Answer:
     """Один запрос к модели с полным набором рычагов управления ответом.
 
@@ -126,7 +135,7 @@ def ask(
     request, model_name = _build_request(
         prompt, system, model, history,
         stream=False, max_tokens=max_tokens, stop=stop, json_mode=json_mode,
-        temperature=temperature, provider=provider,
+        temperature=temperature, provider=provider, tools=tools,
     )
     started = time.monotonic()
 
@@ -135,12 +144,17 @@ def ask(
 
     try:
         choice = body["choices"][0]
+        message = choice["message"]
         return Answer(
-            text=choice["message"]["content"],
+            # content приходит null, когда модель вместо ответа просит
+            # вызвать инструменты. Пустая строка тут честнее, чем None:
+            # текста действительно нет.
+            text=message.get("content") or "",
             finish_reason=choice.get("finish_reason", "?"),
             model=body.get("model", model_name),
             seconds=round(time.monotonic() - started, 1),
             usage=body.get("usage", {}),
+            tool_calls=message.get("tool_calls") or [],
         )
     except (KeyError, IndexError) as exc:
         raise LLMError(f"Неожиданный формат ответа: {body}") from exc
@@ -209,6 +223,7 @@ def _build_request(
     json_mode: bool = False,
     temperature: float | None = None,
     provider: Provider | None = None,
+    tools: list[dict] | None = None,
 ) -> tuple[urllib.request.Request, str]:
     """Собирает POST-запрос к /chat/completions."""
     load_env()
@@ -232,7 +247,11 @@ def _build_request(
     if system:
         messages.append({"role": "system", "content": system})
     messages.extend(history or [])
-    messages.append({"role": "user", "content": prompt})
+    # prompt=None означает «продолжай с тем, что уже в history»: так
+    # возвращаются к модели результаты инструментов, без нового вопроса
+    # от человека.
+    if prompt is not None:
+        messages.append({"role": "user", "content": prompt})
 
     body: dict = {"model": model, "messages": messages, "stream": stream}
     if max_tokens is not None:
@@ -243,6 +262,8 @@ def _build_request(
         body["response_format"] = {"type": "json_object"}
     if temperature is not None:
         body["temperature"] = temperature
+    if tools:
+        body["tools"] = tools
     if stream:
         body["stream_options"] = {"include_usage": True}
 
