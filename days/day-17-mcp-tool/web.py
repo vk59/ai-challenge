@@ -47,6 +47,11 @@ AGENT = Agent(name="Летописец", role=РОЛЬ, store=STORE,
               session=os.environ.get("AI_ADVENT_SESSION", DEFAULT_SESSION),
               temperature=0.3, max_tokens=1500, memory_turns=6)
 AGENT.tools = TOOLSET
+# Наследие прошлых дней никуда не делось: память по слоям (день 11)
+# и слежение за этапом задачи (день 13) продолжают работать, просто
+# в окне они убраны под каты — главное здесь инструменты.
+AGENT.layered = True
+AGENT.tracking = True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -66,6 +71,32 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/reset":
             AGENT.reset()
+            self._send_json(200, self._state())
+            return
+
+        if route == "/session":
+            payload = self._payload()
+            if payload is None:
+                return
+            AGENT.switch(str(payload.get("session", "")).strip() or DEFAULT_SESSION)
+            self._send_json(200, self._state())
+            return
+
+        if route == "/chat/rename":
+            payload = self._payload()
+            if payload is None:
+                return
+            if not AGENT.rename(str(payload.get("title", ""))):
+                self._send_json(400, {"error": "Имя занято или пустое"})
+                return
+            self._send_json(200, self._state())
+            return
+
+        if route == "/chat/delete":
+            payload = self._payload()
+            if payload is None:
+                return
+            AGENT.drop(str(payload.get("session", "")).strip())
             self._send_json(200, self._state())
             return
 
@@ -141,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
         return {
             "name": AGENT.name,
             "model": AGENT.model,
+            "session": AGENT.session,
+            "chats": AGENT.chats(),
             "mcp": TOOLSET.describe(),
             "tools": [
                 {"name": с["function"]["name"],
@@ -155,6 +188,14 @@ class Handler(BaseHTTPRequestHandler):
             "last": ({"prompt": последний.prompt_tokens,
                       "completion": последний.completion_tokens}
                      if последний else {}),
+            # Наследие дней 11-15. В окне это под катами, но данные
+            # отдаются всегда: спрятать не значит выбросить.
+            "layers": AGENT.layers(),
+            "task": AGENT.task_view(),
+            "profiles": [p.as_dict() for p in AGENT.profiles()],
+            "profile": AGENT.profile.name if AGENT.profile else "",
+            "invariants": [i.as_dict() for i in AGENT.invariants],
+            "weigh": AGENT.weigh(),
             "history": [{"role": t.role, "content": t.content, "when": t.when}
                         for t in AGENT.transcript()],
         }

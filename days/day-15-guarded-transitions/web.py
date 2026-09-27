@@ -104,6 +104,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, self._state())
             return
 
+        if route == "/chat/rename":
+            payload = self._payload()
+            if payload is None:
+                return
+            if not AGENT.rename(str(payload.get("title", ""))):
+                self._send_json(400, {"error": "Имя занято или пустое"})
+                return
+            self._send_json(200, self._state())
+            return
+
         if route == "/chat/delete":
             payload = self._payload()
             if payload is None:

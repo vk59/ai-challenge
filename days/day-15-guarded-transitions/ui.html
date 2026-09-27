@@ -200,6 +200,7 @@
     <nav class="chats">
       <header>Задачи <button id="newChatBtn" title="Новая задача">+</button></header>
       <div class="chatlist" id="chatList"></div>
+      <div class="hint">двойной клик — переименовать<br>✕ — удалить</div>
     </nav>
 
     <div class="chat-area">
@@ -451,6 +452,7 @@ function renderChats(){
     d.querySelector('.t').textContent=c.title||c.name;
     d.querySelector('.s').textContent=(c.pairs||0)+' пар';
     d.onclick=e=>{if(!e.target.classList.contains('x'))openChat(c.name);};
+    d.ondblclick=e=>{e.stopPropagation();if(c.active)startRename(d,c);};
     d.querySelector('.x').onclick=async e=>{
       e.stopPropagation();
       if(!confirm('Удалить задачу «'+(c.title||c.name)+'»?'))return;
@@ -458,6 +460,18 @@ function renderChats(){
       if(r){apply(r);renderHistory(r.history);}};
     list.append(d);
   }
+}
+function startRename(el,c){
+  const info=el.querySelector('.info');const было=info.innerHTML;
+  const inp=document.createElement('input');inp.value=c.name;
+  info.replaceChildren(inp);inp.focus();inp.select();
+  const конец=async(сохранить)=>{
+    const имя=inp.value.trim();info.innerHTML=было;
+    if(!сохранить||!имя||имя===c.name)return;
+    const r=await post('/chat/rename',{title:имя});if(r)apply(r);
+  };
+  inp.onkeydown=e=>{if(e.key==='Enter')конец(true);if(e.key==='Escape')конец(false);};
+  inp.onblur=()=>конец(true);
 }
 async function openChat(имя){
   const d=await post('/session',{session:имя});
