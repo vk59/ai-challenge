@@ -30,6 +30,22 @@ from pathlib import Path
 КОРЕНЬ = Path(os.environ.get("AI_ADVENT_REPO")
               or Path(__file__).resolve().parents[2])
 
+# Зеркало репозитория для запуска из .app.
+#
+# macOS (TCC) не даёт приложению, запущенному из Finder, читать ~/Documents,
+# и разрешения этого не выпросить из кода: git падает с
+# «Unable to read current working directory: Operation not permitted».
+# Из терминала всё работает, потому что терминалу доступ уже выдан.
+#
+# Поэтому build_app.sh кладёт bare-зеркало в Application Support, куда
+# доступ свободный, и приложение читает историю оттуда. История задним
+# числом не меняется, так что зеркало, снятое при сборке, не врёт —
+# устаревать может только последний коммит.
+ЗЕРКАЛО = os.environ.get("AI_ADVENT_REPO_MIRROR") or ""
+ИСТОЧНИК = Path(ЗЕРКАЛО) if ЗЕРКАЛО and Path(ЗЕРКАЛО).is_dir() else КОРЕНЬ / ".git"
+# В зеркале нет рабочего дерева: файлы читаются из объектов, а не с диска.
+БЕЗ_ДЕРЕВА = ИСТОЧНИК != КОРЕНЬ / ".git"
+
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME = "ai-advent-git"
 SERVER_VERSION = "1.0"
@@ -44,13 +60,36 @@ def log(*части) -> None:
     print(*части, file=sys.stderr, flush=True)
 
 
+# Откуда запускать дочерние процессы. НЕ из репозитория — и вот почему.
+#
+# Когда приложение запущено из Finder, macOS (TCC) не даёт ему читать
+# ~/Documents. subprocess с cwd=КОРЕНЬ делает chdir туда, после чего git
+# при старте вызывает getcwd() и падает:
+#
+#     fatal: Unable to read current working directory: Operation not permitted
+#
+# Причём падает он на ЧТЕНИИ СВОЕЙ рабочей директории, а не репозитория.
+# Поэтому запускаемся из заведомо доступного места, а пути к репозиторию
+# передаём явными ключами — тогда getcwd() ни при чём.
+БЕЗОПАСНЫЙ_CWD = "/tmp"
+
+
 def git(*аргументы: str) -> str:
-    """Запускает git в корне репозитория и возвращает вывод."""
-    готово = subprocess.run(["git", *аргументы], cwd=КОРЕНЬ,
+    """Запускает git с явными путями, не полагаясь на рабочую директорию."""
+    команда = ["git", "--git-dir", str(ИСТОЧНИК)]
+    if not БЕЗ_ДЕРЕВА:
+        команда += ["--work-tree", str(КОРЕНЬ)]
+    команда += list(аргументы)
+    готово = subprocess.run(команда, cwd=БЕЗОПАСНЫЙ_CWD,
                             capture_output=True, text=True, timeout=30)
     if готово.returncode != 0:
+        подсказка = ""
+        if "Operation not permitted" in готово.stderr:
+            подсказка = ("\nПохоже, macOS не пускает приложение к папке "
+                         f"{КОРЕНЬ}. Выдайте доступ: Системные настройки → "
+                         "Конфиденциальность и безопасность → Файлы и папки.")
         raise ValueError(f"git {' '.join(аргументы)}: "
-                         f"{готово.stderr.strip()[:200]}")
+                         f"{готово.stderr.strip()[:200]}{подсказка}")
     return готово.stdout
 
 
@@ -122,6 +161,19 @@ def найти_коммит_дня(день: int) -> str:
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "commits_by_day",
+        "description": "Сколько коммитов сделано в каждый календарный день. "
+                       "Используй для вопросов вида «когда работали больше "
+                       "всего», «в какой день сколько коммитов».",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "top": {"type": "integer",
+                        "description": "показать только N самых плотных дней"},
+            },
+        },
+    },
+    {
         "name": "github_info",
         "description": "Сведения о репозитории на GitHub через gh CLI: "
                        "имя, видимость, последний push. Требует авторизованного gh.",
@@ -170,29 +222,67 @@ def выполнить(имя: str, аргументы: dict) -> str:
         первый = git("log", "--reverse", "--format=%ad", "--date=short"
                      ).splitlines()[0]
         последний = git("log", "-1", "--format=%ad", "--date=short").strip()
-        дней = len(list((КОРЕНЬ / "days").glob("day-*")))
-        файлов = len(git("ls-files").splitlines())
-        сумма = 0
-        for имя_файла in git("ls-files").splitlines():
-            полный = КОРЕНЬ / имя_файла
-            try:
-                сумма += sum(1 for _ in полный.open(encoding="utf-8",
-                                                     errors="ignore"))
-            except OSError:
-                pass
+        дней = len({путь.split("/")[1] for путь in
+                    git("ls-tree", "-r", "HEAD", "--name-only").splitlines()
+                    if путь.startswith("days/") and "/" in путь[5:]})
+        # ls-files работает по индексу, которого в зеркале нет; ls-tree
+        # читает то же самое прямо из коммита.
+        файлы = git("ls-tree", "-r", "HEAD", "--name-only").splitlines()
+        файлов = len(файлы)
+
+        if БЕЗ_ДЕРЕВА:
+            # Считать строки в зеркале значило бы вытаскивать каждый файл
+            # из объектов — дорого и незачем. Честнее не показывать число,
+            # чем показать неверное.
+            строки_итог = "строк: считаются только при запуске из репозитория"
+        else:
+            сумма, не_прочитано = 0, 0
+            for имя_файла in файлы:
+                полный = КОРЕНЬ / имя_файла
+                try:
+                    сумма += sum(1 for _ in полный.open(encoding="utf-8",
+                                                         errors="ignore"))
+                except OSError:
+                    не_прочитано += 1
+            строки_итог = (f"строк всего: {сумма}" if не_прочитано == 0
+                           else f"строк: {сумма} (не прочитано "
+                                f"{не_прочитано} файлов)")
         return (f"Репозиторий AI Advent\n"
                 f"коммитов: {коммитов}\n"
                 f"папок с днями: {дней}\n"
                 f"файлов под версией: {файлов}\n"
-                f"строк всего: {сумма}\n"
+                f"{строки_итог}\n"
                 f"первый коммит: {первый}\n"
                 f"последний коммит: {последний}")
 
+    if имя == "commits_by_day":
+        даты = git("log", "--format=%ad", "--date=short").split()
+        if not даты:
+            return "Коммитов нет."
+        подсчёт: dict[str, int] = {}
+        for дата in даты:
+            подсчёт[дата] = подсчёт.get(дата, 0) + 1
+        по_убыванию = sorted(подсчёт.items(), key=lambda п: (-п[1], п[0]))
+        предел = аргументы.get("top")
+        показать = по_убыванию[:int(предел)] if предел else по_убыванию
+        максимум = по_убыванию[0]
+        строки = [f"Всего коммитов: {len(даты)} за {len(подсчёт)} дней",
+                  f"Больше всего — {максимум[0]}: {максимум[1]} коммитов", ""]
+        for дата, сколько in показать:
+            строки.append(f"{дата}  {'█' * сколько} {сколько}")
+        return обрезать("\n".join(строки))
+
     if имя == "github_info":
-        готово = subprocess.run(
-            ["gh", "repo", "view", "--json",
-             "name,visibility,pushedAt,description,url"],
-            cwd=КОРЕНЬ, capture_output=True, text=True, timeout=30)
+        # -R вместо cwd: по той же причине, что и у git выше. Адрес
+        # достаём из самого репозитория, чтобы не зашивать его в код.
+        адрес = git("config", "--get", "remote.origin.url").strip()
+        краткий = адрес.split(":")[-1].removesuffix(".git") if адрес else ""
+        команда = ["gh", "repo", "view", "--json",
+                   "name,visibility,pushedAt,description,url"]
+        if краткий:
+            команда.insert(3, краткий)
+        готово = subprocess.run(команда, cwd=БЕЗОПАСНЫЙ_CWD,
+                                capture_output=True, text=True, timeout=30)
         if готово.returncode != 0:
             raise ValueError(f"gh: {готово.stderr.strip()[:200]}")
         d = json.loads(готово.stdout)
@@ -261,7 +351,9 @@ def обработать(письмо: dict) -> dict | None:
 
 
 def main() -> int:
-    log(f"{SERVER_NAME} {SERVER_VERSION} запущен, корень {КОРЕНЬ}")
+    log(f"{SERVER_NAME} {SERVER_VERSION} запущен")
+    log(f"  источник истории: {ИСТОЧНИК}"
+        + ("  (зеркало, без рабочего дерева)" if БЕЗ_ДЕРЕВА else ""))
     for строка in sys.stdin:
         строка = строка.strip()
         if not строка:

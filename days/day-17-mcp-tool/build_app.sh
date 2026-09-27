@@ -66,6 +66,23 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+echo "→ Зеркало репозитория"
+# macOS не даёт приложению, запущенному из Finder, читать ~/Documents:
+# git падает с «Operation not permitted», и выпросить доступ из кода нельзя.
+# Поэтому кладём bare-зеркало рядом с рантаймом, куда доступ свободный.
+# История задним числом не меняется, так что зеркало не врёт — устареть
+# может только последний коммит, до следующей пересборки.
+MIRROR="$SUPPORT/repo.git"
+if [ -d "$MIRROR" ]; then
+  git --git-dir="$MIRROR" fetch --prune origin "+refs/*:refs/*" 2>/dev/null \
+    || git --git-dir="$MIRROR" fetch --all --prune 2>/dev/null || true
+  echo "  обновлено: $MIRROR"
+else
+  git clone --mirror "$ROOT" "$MIRROR" >/dev/null 2>&1
+  echo "  создано: $MIRROR"
+fi
+echo "  коммитов в зеркале: $(git --git-dir="$MIRROR" rev-list --count HEAD)"
+
 echo "→ Настройки"
 if [ -f "$ROOT/.env" ]; then
   cp "$ROOT/.env" "$SUPPORT/.env"
@@ -81,7 +98,8 @@ cat > "$APP/Contents/MacOS/launcher" <<LAUNCHER
 AI_ADVENT_ENV_FILE="$SUPPORT/.env"
 AI_ADVENT_MEMORY_DIR="$MEMORY"
 AI_ADVENT_REPO="$ROOT"
-export AI_ADVENT_ENV_FILE AI_ADVENT_MEMORY_DIR AI_ADVENT_REPO
+AI_ADVENT_REPO_MIRROR="$MIRROR"
+export AI_ADVENT_ENV_FILE AI_ADVENT_MEMORY_DIR AI_ADVENT_REPO AI_ADVENT_REPO_MIRROR
 RESOURCES="\$(cd "\$(dirname "\$0")/../Resources" && pwd)"
 exec "$VENV/bin/python" "\$RESOURCES/app.py"
 LAUNCHER
