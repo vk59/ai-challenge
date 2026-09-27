@@ -47,6 +47,7 @@
 | 16 | Подключение MCP | [days/day-16-mcp](days/day-16-mcp) | ✅ код готов, нужно видео |
 | 17 | Первый инструмент MCP | [days/day-17-mcp-tool](days/day-17-mcp-tool) | ✅ код готов, нужно видео |
 | 18 | Планировщик и фон | [days/day-18-scheduler](days/day-18-scheduler) | ✅ код готов, нужно видео |
+| 19 | Пайплайн инструментов | [days/day-19-pipeline](days/day-19-pipeline) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 
