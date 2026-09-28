@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Диспетчер — оркестрация MCP-серверов</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --bubble:#e9e9eb;--field:#fff;--border:rgba(0,0,0,.12);
+    --hairline:rgba(0,0,0,.08);--accent:#007aff;--code-bg:rgba(0,0,0,.05);
+    --danger:#d70015;--danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;
+    --git:#ff9f0a;--sched:#5e5ce6;--pipe:#34c759;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --bubble:#3a3a3c;--field:#2c2c2e;--border:rgba(255,255,255,.14);
+    --hairline:rgba(255,255,255,.10);--accent:#0a84ff;--code-bg:rgba(255,255,255,.07);
+    --danger:#ff6961;--danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;
+    --git:#ffb340;--sched:#7d7aff;--pipe:#30d158;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1300px);height:min(100%,820px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+
+  .body{flex:1;min-height:0;display:flex}
+  .chats{flex:none;width:168px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column}
+  .chats header{flex:none;display:flex;align-items:center;padding:9px 10px 7px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .chats header button{margin-left:auto;width:22px;height:22px;display:grid;
+    place-items:center;font-size:15px;line-height:1;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;padding:0}
+  .chatlist{flex:1;min-height:0;overflow-y:auto;padding:0 7px 9px;
+    display:flex;flex-direction:column;gap:2px}
+  .chat{display:flex;align-items:center;gap:5px;padding:6px 8px;border-radius:7px;
+    cursor:pointer;border:.5px solid transparent}
+  .chat:hover{background:var(--field)}
+  .chat.active{background:var(--field);border-color:var(--border)}
+  .chat .info{flex:1;min-width:0}
+  .chat .t{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chat.active .t{font-weight:600}
+  .chat .s{font-size:10px;color:var(--muted)}
+  .chat .x{flex:none;opacity:0;color:var(--muted);font-size:12px;padding:0 2px}
+  .chat:hover .x{opacity:.55}
+  .chat .x:hover{opacity:1;color:var(--danger)}
+  .chat input{width:100%;font:inherit;font-size:12px;padding:1px 4px;
+    background:var(--canvas);border:.5px solid var(--accent);border-radius:4px;
+    color:var(--text);outline:none}
+  .hint{padding:0 10px 9px;font-size:10px;color:var(--muted);line-height:1.35}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+
+  /* ── серверы и готовые сценарии ─────────────────────────────────── */
+  .top{flex:none;padding:9px 14px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .srv{display:flex;gap:7px;flex-wrap:wrap}
+  .chip{display:flex;align-items:center;gap:6px;padding:5px 10px;
+    background:var(--field);border:.5px solid var(--border);border-radius:8px;
+    font-size:11.5px}
+  .chip .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .chip.git .dot{background:var(--git)}
+  .chip.sched .dot{background:var(--sched)}
+  .chip.pipe .dot{background:var(--pipe)}
+  .chip b{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px}
+  .chip.git b{color:var(--git)}.chip.sched b{color:var(--sched)}
+  .chip.pipe b{color:var(--pipe)}
+  .chip .area{color:var(--muted)}
+  .chip .cnt{color:var(--muted);font-variant-numeric:tabular-nums}
+  .scen{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .scen button{font:inherit;font-size:11.5px;padding:4px 9px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:7px;
+    cursor:pointer;text-align:left}
+  .scen button:hover{border-color:var(--accent)}
+  .scen button:disabled{opacity:.45;cursor:default}
+  .scen button .n{color:var(--muted);font-variant-numeric:tabular-nums}
+
+  .transcript{flex:1;min-height:0;overflow-y:auto;padding:15px;
+    display:flex;flex-direction:column;gap:10px}
+  .msg{display:flex;flex-direction:column}
+  .msg.me{align-items:flex-end}.msg.bot{align-items:flex-start}
+  .bubble{max-width:88%;padding:8px 13px;border-radius:17px;overflow-wrap:anywhere}
+  .me .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:5px;
+    white-space:pre-wrap}
+  .bot .bubble{background:var(--bubble);border-bottom-left-radius:5px}
+  .bot .bubble.error{background:var(--danger-bg);color:var(--danger)}
+  .bubble p{margin:.5em 0}.bubble>:first-child{margin-top:0}
+  .bubble>:last-child{margin-bottom:0}
+  .bubble ul,.bubble ol{margin:.5em 0;padding-left:1.3em}
+  .bubble code{font:12px/1.4 ui-monospace,"SF Mono",Menlo,monospace;
+    background:var(--code-bg);padding:.1em .3em;border-radius:4px}
+  .bubble pre{margin:.5em 0;padding:9px 11px;background:var(--code-bg);
+    border-radius:8px;overflow-x:auto}
+  .call{max-width:88%;border-radius:10px;padding:7px 11px;font-size:12px;
+    border:.5px solid}
+  .call.git{background:color-mix(in srgb,var(--git) 11%,transparent);
+    border-color:color-mix(in srgb,var(--git) 40%,transparent)}
+  .call.sched{background:color-mix(in srgb,var(--sched) 11%,transparent);
+    border-color:color-mix(in srgb,var(--sched) 40%,transparent)}
+  .call.pipe{background:color-mix(in srgb,var(--pipe) 11%,transparent);
+    border-color:color-mix(in srgb,var(--pipe) 40%,transparent)}
+  .call.failed{background:var(--danger-bg);
+    border-color:color-mix(in srgb,var(--danger) 40%,transparent)}
+  .call .head{display:flex;align-items:baseline;gap:6px;font-weight:650;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11.5px}
+  .call.git .head{color:var(--git)}.call.sched .head{color:var(--sched)}
+  .call.pipe .head{color:var(--pipe)}
+  .call .step{flex:none;font-size:10px;opacity:.75}
+  .call .srvtag{flex:none;padding:0 5px;border-radius:4px;font-size:10px;
+    background:currentColor}
+  .call .srvtag span{color:var(--canvas);font-weight:700}
+  .call .args{font:11.5px/1.4 ui-monospace,"SF Mono",Menlo,monospace;
+    color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+  .call .prev{margin-top:5px;padding-top:5px;
+    border-top:.5px solid var(--hairline);
+    font:11.5px/1.45 ui-monospace,"SF Mono",Menlo,monospace;opacity:.8;
+    white-space:pre-wrap}
+  .note{max-width:88%;font-size:11.5px;color:var(--muted);
+    background:var(--code-bg);border-radius:8px;padding:6px 10px}
+  .note b{color:var(--text)}
+  .thinking{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+  .empty{margin:auto;text-align:center;max-width:470px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .composer{flex:none;display:flex;align-items:flex-end;gap:8px;padding:9px 12px;
+    background:var(--chrome);border-top:.5px solid var(--hairline)}
+  .composer textarea{flex:1;resize:none;max-height:100px;padding:7px 12px;font:inherit;
+    color:var(--text);background:var(--field);border:.5px solid var(--border);
+    border-radius:16px;outline:none}
+  .send{flex:none;width:30px;height:30px;display:grid;place-items:center;font-size:15px;
+    color:#fff;background:var(--accent);border:0;border-radius:50%;cursor:pointer}
+  .send:disabled{background:var(--bubble);color:var(--muted);cursor:default}
+
+  /* ── маршрут ────────────────────────────────────────────────────── */
+  .side{flex:none;width:292px;border-left:.5px solid var(--hairline);
+    background:var(--chrome);display:flex;flex-direction:column;overflow-y:auto}
+  .side>header{flex:none;display:flex;align-items:center;padding:10px 12px 6px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .side>header button{margin-left:auto;font:inherit;font-size:10.5px;
+    text-transform:none;letter-spacing:0;padding:2px 7px;background:var(--field);
+    border:.5px solid var(--border);border-radius:5px;color:var(--muted);
+    cursor:pointer}
+  .hop{position:relative;margin:0 10px 4px 10px;padding:6px 9px 6px 30px;
+    background:var(--field);border:.5px solid var(--border);border-radius:7px;
+    font-size:11.5px}
+  .hop::before{content:attr(data-n);position:absolute;left:8px;top:6px;
+    width:15px;height:15px;border-radius:50%;display:grid;place-items:center;
+    font-size:9.5px;font-weight:700;color:var(--canvas)}
+  .hop.git::before{background:var(--git)}
+  .hop.sched::before{background:var(--sched)}
+  .hop.pipe::before{background:var(--pipe)}
+  .hop.failed{border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
+  .hop .top{display:flex;align-items:baseline;gap:5px}
+  .hop .s{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:10px;
+    font-weight:700}
+  .hop.git .s{color:var(--git)}.hop.sched .s{color:var(--sched)}
+  .hop.pipe .s{color:var(--pipe)}
+  .hop .t{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px}
+  .hop .sec{margin-left:auto;color:var(--muted);font-size:10px;
+    font-variant-numeric:tabular-nums}
+  .hop .a{margin-top:2px;color:var(--muted);font-size:10.5px;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px 12px 8px}
+  .checks{margin:6px 10px 8px;padding:7px 9px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;font-size:11px}
+  .checks .c{display:flex;gap:5px;align-items:baseline;margin-top:2px}
+  .checks .c:first-child{margin-top:0}
+  .checks .c i{flex:none;font-style:normal;font-weight:700}
+  .checks .c.ok i{color:var(--ok)}
+  .checks .c.no i{color:var(--danger)}
+  details.kat{border-top:.5px solid var(--hairline);margin-top:6px}
+  details.kat>summary{padding:8px 12px;font-size:11.5px;cursor:pointer;
+    list-style:none;color:var(--text)}
+  details.kat>summary::-webkit-details-marker{display:none}
+  details.kat>summary::before{content:'▸ ';color:var(--muted)}
+  details.kat[open]>summary::before{content:'▾ '}
+  details.kat .inner{padding:0 12px 10px;font-size:11px}
+  .tl{margin-bottom:4px}
+  .tl .n{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:10.5px}
+  .tl.git .n{color:var(--git)}.tl.sched .n{color:var(--sched)}
+  .tl.pipe .n{color:var(--pipe)}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1180px){.side{width:256px}.chats{width:146px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b id="chatTitle">Диспетчер</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="chats">
+      <header>Чаты <button id="newChatBtn" title="Новый чат">+</button></header>
+      <div class="chatlist" id="chatList"></div>
+      <div class="hint">двойной клик — переименовать<br>✕ — удалить</div>
+    </nav>
+
+    <div class="main">
+      <div class="top">
+        <div class="srv" id="srvList"></div>
+        <div class="scen" id="scenList"></div>
+      </div>
+      <div class="transcript" id="transcript"></div>
+      <footer class="composer">
+        <textarea id="prompt" rows="1" placeholder="Спросите что угодно — инструмент выберет агент сам…"></textarea>
+        <button class="send" id="send" disabled title="Отправить (Enter)">↑</button>
+      </footer>
+    </div>
+
+    <aside class="side">
+      <header>Маршрут <button id="clearFlow">очистить</button></header>
+      <div id="flowList"></div>
+      <div id="checksBox"></div>
+      <details class="kat">
+        <summary>Все 19 инструментов</summary>
+        <div class="inner" id="toolList"></div>
+      </details>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span>модель <b id="model">—</b></span>
+    <span><b id="mcp">—</b></span>
+    <span>вызовов <b id="hops">0</b></span>
+    <span>токенов <b id="tokens">0</b></span>
+    <span>потрачено <b id="spent">—</b></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">🎛</div>
+    <h2>Три MCP-сервера в одном чате</h2>
+    <p>19 инструментов, и ни одной кнопки «вызвать». Куда идти —
+       в git, в планировщик или в конвейер — решает агент по смыслу вопроса.
+       Справа видно, к какому серверу ушёл каждый вызов и в каком порядке.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const transcript=$('#transcript'),promptEl=$('#prompt'),sendEl=$('#send');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+function md(src){
+  const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  if(((src.match(/```/g)||[]).length)%2) src+='\n```';
+  const blocks=[];
+  src=src.replace(/```[a-zA-Z0-9+#.-]*\n?([\s\S]*?)```/g,(_,b)=>{
+    blocks.push('<pre><code>'+esc(b.replace(/\n+$/,''))+'</code></pre>');
+    return '\n@@C'+(blocks.length-1)+'@@\n';});
+  const inl=s=>esc(s).replace(/`([^`\n]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
+  const out=[];let list=null;
+  const close=()=>{if(list){out.push('</'+list+'>');list=null;}};
+  for(const raw of src.split('\n')){
+    const l=raw.trim();const p=l.match(/^@@C(\d+)@@$/);
+    if(p){close();out.push(blocks[+p[1]]);continue;}
+    if(!l){close();continue;}
+    const b=l.match(/^[-*•]\s+(.*)$/),n=l.match(/^\d+[.)]\s+(.*)$/);
+    if(b||n){const w=b?'ul':'ol';if(list!==w){close();out.push('<'+w+'>');list=w;}
+      out.push('<li>'+inl((b||n)[1])+'</li>');continue;}
+    close();out.push('<p>'+inl(l)+'</p>');
+  }
+  close();return out.join('');
+}
+function showEmpty(){transcript.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function addMsg(who){
+  const e=$('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className='msg '+who;
+  d.innerHTML='<div class="bubble"></div>';transcript.append(d);
+  return d.firstElementChild;
+}
+const scroll=()=>transcript.scrollTo({top:transcript.scrollHeight,behavior:'smooth'});
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body||{})});
+  const d=await r.json();
+  if(d.error){alert(d.error);return null;}
+  return d;
+}
+const краткие=o=>Object.entries(o||{})
+  .map(([k,v])=>k+'='+JSON.stringify(v)).join(', ');
+
+/* ── вызов в переписке ─────────────────────────────────────────── */
+function addCall(ш){
+  const e=$('.empty');if(e)e.remove();
+  const d=document.createElement('div');
+  d.className='call '+ш.server+(ш.failed?' failed':'');
+  d.innerHTML='<div class="head"><span class="step"></span>'
+    +'<span class="srvtag"><span></span></span><span class="nm"></span></div>'
+    +'<div class="args"></div><div class="prev"></div>';
+  d.querySelector('.step').textContent='#'+ш.n;
+  d.querySelector('.srvtag span').textContent=ш.server;
+  d.querySelector('.nm').textContent=ш.tool+(ш.failed?' — ошибка':'');
+  d.querySelector('.args').textContent=краткие(ш.args)||'без аргументов';
+  const пред=(ш.preview||[]).join('\n');
+  const prev=d.querySelector('.prev');
+  if(пред)prev.textContent=пред;else prev.remove();
+  transcript.append(d);scroll();
+}
+
+/* ── панель маршрута ───────────────────────────────────────────── */
+function renderFlow(){
+  const box=$('#flowList');box.replaceChildren();
+  const шаги=state.flow||[];
+  $('#hops').textContent=шаги.length;
+  if(!шаги.length){
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'вызовов пока не было'}));
+    return;
+  }
+  for(const ш of шаги){
+    const d=document.createElement('div');
+    d.className='hop '+ш.server+(ш.failed?' failed':'');
+    d.dataset.n=ш.n;
+    d.innerHTML='<div class="top"><span class="s"></span><span class="t"></span>'
+      +'<span class="sec"></span></div><div class="a"></div>';
+    d.querySelector('.s').textContent=ш.server;
+    d.querySelector('.t').textContent=ш.tool;
+    d.querySelector('.sec').textContent=(ш.seconds??0)+'с';
+    const a=d.querySelector('.a');
+    const текст=краткие(ш.args);
+    if(текст)a.textContent=текст;else a.remove();
+    box.append(d);
+  }
+}
+function renderChecks(проверки){
+  const box=$('#checksBox');box.replaceChildren();
+  if(!проверки||!проверки.length)return;
+  const d=document.createElement('div');d.className='checks';
+  for(const п of проверки){
+    const с=document.createElement('div');
+    с.className='c '+(п.ok?'ok':'no');
+    с.innerHTML='<i></i><span></span>';
+    с.querySelector('i').textContent=п.ok?'✓':'✗';
+    с.querySelector('span').textContent=п.text;
+    d.append(с);
+  }
+  box.append(d);
+}
+function renderServers(){
+  const box=$('#srvList');box.replaceChildren();
+  for(const с of state.servers||[]){
+    const d=document.createElement('div');d.className='chip '+с.name;
+    d.innerHTML='<span class="dot"></span><b></b><span class="area"></span>'
+      +'<span class="cnt"></span>';
+    d.querySelector('b').textContent=с.name;
+    d.querySelector('.area').textContent=с.area;
+    d.querySelector('.cnt').textContent=(с.tools||[]).length+' инстр.';
+    box.append(d);
+  }
+}
+function renderScenarios(){
+  const box=$('#scenList');box.replaceChildren();
+  for(const с of state.scenarios||[]){
+    const b=document.createElement('button');
+    b.disabled=busy;
+    b.innerHTML='<span class="n"></span> <span class="t"></span>';
+    b.querySelector('.n').textContent=с.n+'.';
+    b.querySelector('.t').textContent=с.title;
+    b.title=с.prompt;
+    b.onclick=()=>send(с.prompt,с.n);
+    box.append(b);
+  }
+}
+function renderTools(){
+  const box=$('#toolList');box.replaceChildren();
+  for(const с of state.servers||[]){
+    for(const т of с.tools||[]){
+      const d=document.createElement('div');d.className='tl '+с.name;
+      d.innerHTML='<span class="n"></span>';
+      d.querySelector('.n').textContent=с.name+'__'+т;
+      box.append(d);
+    }
+  }
+}
+
+/* ── чаты ──────────────────────────────────────────────────────── */
+function renderChats(){
+  const list=$('#chatList');list.replaceChildren();
+  for(const c of state.chats||[]){
+    const d=document.createElement('div');
+    d.className='chat'+(c.active?' active':'');
+    d.innerHTML='<div class="info"><div class="t"></div><div class="s"></div></div>'
+               +'<span class="x">✕</span>';
+    d.querySelector('.t').textContent=c.title||c.name;
+    d.querySelector('.s').textContent=(c.pairs||0)+' пар';
+    d.onclick=e=>{if(!e.target.classList.contains('x'))openChat(c.name);};
+    d.ondblclick=e=>{e.stopPropagation();if(c.active)startRename(d,c);};
+    d.querySelector('.x').onclick=async e=>{
+      e.stopPropagation();
+      if(!confirm('Удалить чат «'+(c.title||c.name)+'»?'))return;
+      const r=await post('/chat/delete',{session:c.name});
+      if(r){apply(r);renderHistory(r.history);}};
+    list.append(d);}
+}
+function startRename(el,c){
+  const info=el.querySelector('.info');const было=info.innerHTML;
+  const inp=document.createElement('input');inp.value=c.name;
+  info.replaceChildren(inp);inp.focus();inp.select();
+  const конец=async(сохранить)=>{
+    const имя=inp.value.trim();info.innerHTML=было;
+    if(!сохранить||!имя||имя===c.name)return;
+    const r=await post('/chat/rename',{title:имя});if(r)apply(r);};
+  inp.onkeydown=e=>{if(e.key==='Enter')конец(true);if(e.key==='Escape')конец(false);};
+  inp.onblur=()=>конец(true);
+}
+async function openChat(имя){
+  const d=await post('/session',{session:имя});
+  if(!d)return;apply(d);renderHistory(d.history);renderChecks(null);
+  sync();promptEl.focus();}
+async function newChat(){
+  const занятые=new Set((state.chats||[]).map(c=>c.name));
+  let n=занятые.size+1,имя='чат-'+n;
+  while(занятые.has(имя))имя='чат-'+(++n);
+  await openChat(имя);}
+
+function apply(next){
+  if(!next)return;
+  state={...state,...next};
+  $('#model').textContent=state.model||'—';
+  $('#mcp').textContent=state.mcp||'—';
+  const чат=(state.chats||[]).find(c=>c.active);
+  $('#chatTitle').textContent=чат?(чат.title||чат.name):'Диспетчер';
+  $('#subtitle').textContent=(state.servers||[]).map(с=>с.name).join(' · ');
+  $('#tokens').textContent=(state.tokens||0).toLocaleString('ru');
+  $('#spent').textContent=state.spent||'—';
+  renderChats();renderServers();renderScenarios();renderFlow();renderTools();
+}
+function renderHistory(h){
+  transcript.replaceChildren();
+  if(!h||!h.length){showEmpty();return;}
+  for(const t of h){
+    const b=addMsg(t.role==='user'?'me':'bot');
+    if(t.role==='user')b.textContent=t.content;else b.innerHTML=md(t.content);}
+  transcript.scrollTop=transcript.scrollHeight;
+}
+
+async function send(готовый,номер){
+  const message=(готовый||promptEl.value).trim();
+  if(!message||busy)return;
+  busy=true;if(!готовый){promptEl.value='';grow();}
+  sync();renderScenarios();renderChecks(null);
+  addMsg('me').textContent=message;
+  const ждём=document.createElement('div');ждём.className='thinking';
+  ждём.innerHTML='<div class="dots"><i></i><i></i><i></i></div>'
+    +'<span>выбирает инструмент…</span>';
+  transcript.append(ждём);scroll();
+  try{
+    const тело={message};if(номер)тело.scenario=номер;
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(тело)});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const {value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){ждём.remove();const b=addMsg('bot');
+          b.classList.add('error');b.textContent=m.error;break;}
+        if(m.flow_reset){state.flow=[];renderFlow();}
+        if(m.step){
+          state.flow=[...(state.flow||[]),m.step];renderFlow();
+          ждём.querySelector('span').textContent=
+            'сервер '+m.step.server+' → '+m.step.tool+'…';
+          addCall(m.step);
+        }
+        if(m.answer!==undefined){ждём.remove();
+          addMsg('bot').innerHTML=md(m.answer||'(пусто)');scroll();}
+        if(m.done){apply(m);if(m.checks)renderChecks(m.checks);}
+      }
+    }
+    ждём.remove();
+  }catch(err){ждём.remove();const b=addMsg('bot');
+    b.classList.add('error');b.textContent=String(err.message||err);
+  }finally{busy=false;sync();renderScenarios();scroll();promptEl.focus();}
+}
+
+function sync(){sendEl.disabled=busy||!promptEl.value.trim();}
+function grow(){promptEl.style.height='auto';
+  promptEl.style.height=promptEl.scrollHeight+'px';}
+promptEl.addEventListener('input',()=>{grow();sync();});
+promptEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+sendEl.addEventListener('click',()=>send());
+$('#newChatBtn').addEventListener('click',newChat);
+$('#clearFlow').addEventListener('click',async()=>{
+  const r=await post('/flow/clear');
+  if(r){apply(r);renderChecks(null);}});
+
+fetch('/state').then(r=>r.json())
+  .then(d=>{apply(d);renderHistory(d.history);})
+  .catch(()=>showEmpty());
+</script>
+</body>
+</html>
