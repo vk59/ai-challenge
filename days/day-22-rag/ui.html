@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG — ответы по документам проекта</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --field:#fff;--border:rgba(0,0,0,.12);--hairline:rgba(0,0,0,.08);
+    --accent:#007aff;--code-bg:rgba(0,0,0,.05);--danger:#d70015;
+    --danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--warn:#ff9f0a;--plain:#ff9f0a;--rag:#34c759;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --field:#2c2c2e;--border:rgba(255,255,255,.14);--hairline:rgba(255,255,255,.10);
+    --accent:#0a84ff;--code-bg:rgba(255,255,255,.07);--danger:#ff6961;
+    --danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--warn:#ffb340;--plain:#ffb340;--rag:#30d158;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1340px);height:min(100%,840px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:24px;padding:0 11px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn.go{background:var(--accent);border-color:transparent;color:#fff}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  .body{flex:1;min-height:0;display:flex}
+  .aside{flex:none;width:200px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column;
+    overflow-y:auto}
+  .aside header{flex:none;display:flex;align-items:center;padding:9px 11px 6px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .aside header button{margin-left:auto;font:inherit;font-size:10.5px;
+    text-transform:none;letter-spacing:0;padding:1px 6px;background:var(--field);
+    border:.5px solid var(--border);border-radius:5px;color:var(--muted);
+    cursor:pointer}
+  .qlist{padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
+  .qlist div{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11.5px;
+    border:.5px solid transparent;display:flex;gap:5px;align-items:baseline}
+  .qlist div:hover{background:var(--field);border-color:var(--border)}
+  .qlist div b{flex:none;color:var(--muted);font-variant-numeric:tabular-nums;
+    font-weight:600}
+  .qlist div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px 11px 8px}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{flex:none;padding:10px 14px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .row{display:flex;gap:7px;align-items:center}
+  .row input[type=search]{flex:1;font:inherit;font-size:13px;padding:7px 12px;
+    background:var(--field);border:.5px solid var(--border);border-radius:9px;
+    color:var(--text);outline:none;-webkit-appearance:none}
+  .row input[type=search]:focus{border-color:var(--accent)}
+  .row select{font:inherit;font-size:12px;padding:5px 7px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;color:var(--text)}
+  .tools{display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap}
+  .tools .sp{flex:1}
+  .tools .note{font-size:11px;color:var(--muted)}
+
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:13px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+  .col{background:var(--field);border:.5px solid var(--border);
+    border-radius:10px;overflow:hidden}
+  .col>h3{margin:0;padding:8px 11px;font-size:12px;font-weight:700;
+    display:flex;align-items:center;gap:7px;
+    border-bottom:.5px solid var(--hairline)}
+  .col.plain>h3{color:var(--plain)}
+  .col.rag>h3{color:var(--rag)}
+  .col>h3 .sub{margin-left:auto;font-weight:400;font-size:10.5px;
+    color:var(--muted)}
+  .col .answer{padding:10px 12px;font-size:13px;white-space:pre-wrap;
+    overflow-wrap:anywhere}
+  .col .answer em{font-style:normal;background:rgba(255,159,10,.22);
+    padding:0 2px;border-radius:3px}
+  .verdict{margin:0 12px 10px;padding:6px 9px;border-radius:7px;font-size:11.5px;
+    display:flex;gap:6px;align-items:baseline}
+  .verdict i{font-style:normal;font-weight:700}
+  .verdict.попал{background:rgba(52,199,89,.14);color:var(--ok)}
+  .verdict.признался{background:rgba(255,159,10,.16);color:var(--warn)}
+  .verdict.соврал{background:var(--danger-bg);color:var(--danger)}
+  .srcs{margin:0 12px 10px;padding-top:8px;
+    border-top:.5px solid var(--hairline);font-size:11.5px}
+  .srcs .ttl{color:var(--muted);font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.03em;font-weight:600;margin-bottom:3px}
+  .srcs .one{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px;
+    overflow-wrap:anywhere}
+  .srcs .none{color:var(--danger);font-size:11.5px}
+  .chunks{margin:0 12px 10px;font-size:11px}
+  .chunks .one{display:flex;gap:5px;align-items:baseline;padding:2px 0;
+    color:var(--muted);font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .chunks .one.used{color:var(--text)}
+  .chunks .one b{flex:none;width:30px}
+  .chunks .one .sec{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .meta{margin:0 12px 10px;font-size:10.5px;color:var(--muted);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+
+  table.cmp{width:100%;border-collapse:collapse;font-size:12px}
+  table.cmp th,table.cmp td{padding:5px 7px;text-align:left;
+    border-bottom:.5px solid var(--hairline);vertical-align:top}
+  table.cmp th{font-size:10.5px;color:var(--muted);font-weight:600;
+    text-transform:uppercase;letter-spacing:.03em}
+  table.cmp td.num{text-align:right;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  table.cmp td.mid{text-align:center}
+  .mark{display:inline-grid;place-items:center;width:19px;height:19px;
+    border-radius:50%;font-size:11px;font-weight:700;color:#fff}
+  .mark.попал{background:var(--ok)}
+  .mark.признался{background:var(--warn)}
+  .mark.соврал{background:var(--danger)}
+  .legend{margin:9px 0 0;font-size:11.5px;color:var(--muted)}
+  .legend b{color:var(--text)}
+  .summary{margin-top:11px;padding:9px 12px;background:var(--code-bg);
+    border-radius:9px}
+  .summary table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .summary th,.summary td{padding:4px 7px;text-align:left}
+  .summary th{font-size:10.5px;color:var(--muted);text-transform:uppercase}
+  .summary td.num{text-align:right;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .summary td.big{font-weight:700;font-size:13.5px}
+  .summary .final{margin-top:7px;font-size:12.5px}
+  .empty{margin:auto;text-align:center;max-width:490px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .err{background:var(--danger-bg);color:var(--danger);padding:8px 11px;
+    border-radius:8px;font-size:12px}
+  .waiting{display:flex;gap:7px;align-items:center;font-size:12px;
+    color:var(--muted);padding:4px 0}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1160px){.cols{grid-template-columns:1fr}.aside{width:172px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b>RAG: два режима</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="aside">
+      <header>Контрольные вопросы</header>
+      <div class="qlist" id="qlist"></div>
+      <header>Недавние <button id="clearHist">очистить</button></header>
+      <div class="qlist" id="hist"></div>
+    </nav>
+
+    <div class="main">
+      <div class="top">
+        <div class="row">
+          <input type="search" id="q" placeholder="Спросите про проект — или возьмите вопрос слева">
+          <select id="k">
+            <option value="3">3 выдержки</option>
+            <option value="5" selected>5 выдержек</option>
+            <option value="10">10 выдержек</option>
+          </select>
+          <button class="btn go" id="ask">Спросить оба</button>
+        </div>
+        <div class="tools">
+          <button class="btn" id="run">10 контрольных вопросов</button>
+          <span class="sp"></span>
+          <span class="note" id="note"></span>
+        </div>
+      </div>
+      <div class="pane" id="pane"></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>эмбеддинги <b id="emb">—</b></span>
+    <span>индекс <b id="idx">—</b></span>
+    <span>стратегия <b id="strat">—</b></span>
+    <span id="tok"></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">⚖️</div>
+    <h2>Один вопрос, два ответа</h2>
+    <p>Слева модель отвечает из того, что помнит о мире. Справа — по выдержкам
+       из наших документов, со ссылками, которые тут же можно проверить.
+       Вопросы слева подобраны так, что ответ есть только у нас.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const pane=$('#pane');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+const число=n=>(n??0).toLocaleString('ru');
+const имяф=п=>{const ч=String(п).split('/');return ч.slice(-2).join('/');};
+
+function пусто(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function ошибка(т){
+  const d=document.createElement('div');d.className='err';d.textContent=т;
+  pane.append(d);
+}
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const d=await r.json();
+  if(d.error){ошибка(d.error);return null;}
+  return d;
+}
+function ожидание(текст){
+  const d=document.createElement('div');d.className='waiting';
+  d.innerHTML='<div class="dots"><i></i><i></i><i></i></div><span></span>';
+  d.querySelector('span').textContent=текст;
+  return d;
+}
+
+/* ── боковые списки ────────────────────────────────────────────── */
+function вопросы(){
+  const box=$('#qlist');box.replaceChildren();
+  for(const в of state.questions||[]){
+    const d=document.createElement('div');
+    d.innerHTML='<b></b><span></span>';
+    d.querySelector('b').textContent=в.n+'.';
+    d.querySelector('span').textContent=в.q;
+    d.title=в.q+'\n\nждём: '+в.expect.join('; ')
+      +'\nисточники: '+в.sources.join(', ')+'\n\n'+в.why;
+    d.onclick=()=>{$('#q').value=в.q;спросить();};
+    box.append(d);
+  }
+}
+function недавние(){
+  const box=$('#hist');box.replaceChildren();
+  const список=state.history||[];
+  if(!список.length){
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'пока ничего'}));
+    return;
+  }
+  for(const з of список){
+    const d=document.createElement('div');
+    d.innerHTML='<span></span>';
+    d.querySelector('span').textContent=з;
+    d.title=з;
+    d.onclick=()=>{$('#q').value=з;спросить();};
+    box.append(d);
+  }
+}
+function применить(d){
+  if(!d)return;
+  state={...state,...d};
+  $('#emb').textContent=(state.embedding_model||'—').split('/').pop();
+  const и=state.index||{};
+  $('#idx').textContent=число(и.chunks)+' кусков / '+число(и.documents)+' док.';
+  $('#strat').textContent=state.strategy||'—';
+  $('#subtitle').textContent=(state.questions||[]).length
+    +' контрольных вопросов · выдержек в промпте '+(state.chunks_default||5);
+  вопросы();недавние();
+}
+
+/* ── колонка с ответом ─────────────────────────────────────────── */
+function колонка(о){
+  const col=document.createElement('div');
+  col.className='col '+о.mode;
+  const это_rag=о.mode==='rag';
+  col.innerHTML='<h3><span class="t"></span><span class="sub"></span></h3>'
+    +'<div class="answer"></div>';
+  col.querySelector('.t').textContent=это_rag?'С RAG':'БЕЗ RAG';
+  col.querySelector('.sub').textContent=это_rag
+    ?'отвечает по нашим документам':'отвечает из памяти о мире';
+  col.querySelector('.answer').textContent=(о.text||'(пусто)').trim();
+
+  if(о.verdict){
+    const v=document.createElement('div');
+    v.className='verdict '+о.verdict;
+    v.innerHTML='<i></i><span></span>';
+    v.querySelector('i').textContent=
+      о.verdict==='попал'?'✓':о.verdict==='признался'?'?':'✗';
+    const пояснение={
+      'попал':'ответ содержит ожидаемое',
+      'признался':'честно сказал, что не знает',
+      'соврал':'ответил уверенно, но не то'}[о.verdict];
+    v.querySelector('span').textContent=о.verdict+' — '+пояснение
+      +(о.expect?' (ждали: '+о.expect.join('; ')+')':'');
+    col.append(v);
+  }
+
+  if(это_rag){
+    const s=document.createElement('div');s.className='srcs';
+    s.innerHTML='<div class="ttl">источники</div>';
+    if((о.sources||[]).length){
+      for(const и of о.sources){
+        const d=document.createElement('div');d.className='one';
+        d.textContent=и;s.append(d);
+      }
+    }else{
+      s.append(Object.assign(document.createElement('div'),
+        {className:'none',textContent:'ни на что не сослался'}));
+    }
+    if((о.invented||[]).length){
+      const d=document.createElement('div');d.className='none';
+      d.textContent='⚠ выдуманные номера: '+о.invented.join(', ');
+      s.append(d);
+    }
+    col.append(s);
+
+    if((о.chunks||[]).length){
+      const c=document.createElement('div');c.className='chunks';
+      for(const[и,к]of(о.chunks||[]).entries()){
+        const использован=(о.cited||[]).includes(и+1);
+        const d=document.createElement('div');
+        d.className='one'+(использован?' used':'');
+        d.innerHTML='<b></b><span class="sc"></span><span class="sec"></span>';
+        d.querySelector('b').textContent=(использован?'→ ':'  ')+'['+(и+1)+']';
+        d.querySelector('.sc').textContent=(к.score??0).toFixed(3);
+        d.querySelector('.sec').textContent=имяф(к.source)+' · '+к.section;
+        d.title=к.text||'';
+        c.append(d);
+      }
+      col.append(c);
+    }
+  }
+
+  const m=document.createElement('div');m.className='meta';
+  const части=[о.total_tokens+' ток.',о.seconds+'с'];
+  if(это_rag)части.unshift('поиск '+о.search_seconds+'с');
+  m.textContent=части.join(' · ');
+  col.append(m);
+  return col;
+}
+
+async function спросить(){
+  const вопрос=$('#q').value.trim();
+  if(!вопрос||busy){if(!вопрос)$('#q').focus();return;}
+  busy=true;блок();
+  pane.replaceChildren();
+  const cols=document.createElement('div');cols.className='cols';
+  pane.append(cols);
+  const ждём=ожидание('спрашиваю в двух режимах…');pane.append(ждём);
+  try{
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question:вопрос,chunks:+$('#k').value})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){ждём.remove();ошибка(m.error);break;}
+        if(m.answer)cols.append(колонка(m.answer));
+        if(m.done)применить(m);
+      }
+    }
+  }catch(e){ошибка(String(e.message||e));}
+  finally{ждём.remove();busy=false;блок();}
+}
+
+/* ── весь набор ────────────────────────────────────────────────── */
+async function прогнать(){
+  if(busy)return;
+  busy=true;блок();
+  pane.replaceChildren();
+  const t=document.createElement('table');t.className='cmp';
+  t.innerHTML='<thead><tr><th>#</th><th>вопрос</th>'
+    +'<th class="mid">без RAG</th><th class="mid">с RAG</th>'
+    +'<th class="mid">ист.</th></tr></thead><tbody></tbody>';
+  pane.append(t);
+  const тело=t.querySelector('tbody');
+  const ждём=ожидание('гоняю 10 вопросов в двух режимах, это минута…');
+  pane.append(ждём);
+  const знак=в=>{
+    const s=document.createElement('span');
+    s.className='mark '+в;
+    s.textContent=в==='попал'?'✓':в==='признался'?'?':'✗';
+    s.title=в;return s;};
+  try{
+    const res=await fetch('/evaluate',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chunks:+$('#k').value})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){ошибка(m.error);break;}
+        if(m.row){
+          const tr=document.createElement('tr');
+          tr.innerHTML='<td class="num"></td><td class="qq"></td>'
+            +'<td class="mid a"></td><td class="mid b"></td>'
+            +'<td class="mid s"></td>';
+          tr.querySelector('.num').textContent=m.row.n;
+          tr.querySelector('.qq').textContent=m.row.question;
+          tr.querySelector('.qq').title='ждали: '+m.row.expect.join('; ');
+          tr.querySelector('.a').append(знак(m.row.modes.plain.verdict));
+          tr.querySelector('.b').append(знак(m.row.modes.rag.verdict));
+          tr.querySelector('.s').textContent=m.row.modes.rag.sources_ok?'✓':'✗';
+          tr.querySelector('.s').title=
+            (m.row.modes.rag.sources||[]).join('\n')||'источников нет';
+          тело.append(tr);
+        }
+        if(m.summary){
+          ждём.remove();
+          const b=m.summary.plain,r=m.summary.rag,всего=m.total;
+          const box=document.createElement('div');box.className='summary';
+          box.innerHTML='<table><thead><tr><th>режим</th><th>попал</th>'
+            +'<th>признался</th><th>соврал</th><th>источники</th>'
+            +'<th>токенов</th></tr></thead><tbody>'
+            +`<tr><td>без RAG</td><td class="num big">${b['попал']}/${всего}</td>`
+            +`<td class="num">${b['признался']}</td>`
+            +`<td class="num">${b['соврал']}</td><td class="num">—</td>`
+            +`<td class="num">${число(b['токенов'])}</td></tr>`
+            +`<tr><td>с RAG</td><td class="num big">${r['попал']}/${всего}</td>`
+            +`<td class="num">${r['признался']}</td>`
+            +`<td class="num">${r['соврал']}</td>`
+            +`<td class="num">${r['источники']}/${всего}</td>`
+            +`<td class="num">${число(r['токенов'])}</td></tr></tbody></table>`;
+          const раз=(r['токенов']/Math.max(1,b['токенов'])).toFixed(1);
+          const f=document.createElement('div');f.className='final';
+          f.innerHTML=`RAG добавил правильных ответов: <b>+${r['попал']-b['попал']}</b>`
+            +` из ${всего}. Выдумок: ${b['соврал']} → ${r['соврал']}.`
+            +` Выдуманных ссылок: ${r['выдуманные']}.`
+            +` Токенов в ${раз} раза больше.`;
+          box.append(f);
+          pane.append(box);
+          const l=document.createElement('div');l.className='legend';
+          l.innerHTML='<b>✓ попал</b> — в ответе есть ожидаемое · '
+            +'<b>? признался</b> — честно сказал, что не знает · '
+            +'<b>✗ соврал</b> — ответил уверенно, но не то';
+          pane.append(l);
+        }
+        if(m.done)применить(m);
+      }
+    }
+  }catch(e){ошибка(String(e.message||e));}
+  finally{ждём.remove();busy=false;блок();}
+}
+
+function блок(){for(const id of['ask','run'])$('#'+id).disabled=busy;}
+$('#ask').addEventListener('click',спросить);
+$('#q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();спросить();}});
+$('#run').addEventListener('click',прогнать);
+$('#clearHist').addEventListener('click',async()=>{
+  const d=await post('/history/clear');if(d)применить(d);});
+
+fetch('/state').then(r=>r.json()).then(d=>{
+  применить(d);
+  $('#note').textContent=`индекс: ${число((d.index||{}).chunks)} кусков`
+    +` · стратегия ${d.strategy}`;
+  пусто();
+}).catch(()=>пусто());
+</script>
+</body>
+</html>
