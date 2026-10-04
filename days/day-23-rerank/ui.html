@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Реранкинг — второй этап после поиска</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --field:#fff;--border:rgba(0,0,0,.12);--hairline:rgba(0,0,0,.08);
+    --accent:#007aff;--code-bg:rgba(0,0,0,.05);--danger:#d70015;
+    --danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--warn:#ff9f0a;--up:#34c759;--down:#86868b;
+    --base:#86868b;--threshold:#ff9f0a;--rerank:#5e5ce6;--full:#34c759;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --field:#2c2c2e;--border:rgba(255,255,255,.14);--hairline:rgba(255,255,255,.10);
+    --accent:#0a84ff;--code-bg:rgba(255,255,255,.07);--danger:#ff6961;
+    --danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--warn:#ffb340;--up:#30d158;--down:#98989d;
+    --base:#98989d;--threshold:#ffb340;--rerank:#7d7aff;--full:#30d158;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1340px);height:min(100%,840px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:24px;padding:0 11px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn.go{background:var(--accent);border-color:transparent;color:#fff}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  .body{flex:1;min-height:0;display:flex}
+  .aside{flex:none;width:196px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column;
+    overflow-y:auto}
+  .aside header{flex:none;display:flex;align-items:center;padding:9px 11px 6px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .aside header button{margin-left:auto;font:inherit;font-size:10.5px;
+    text-transform:none;letter-spacing:0;padding:1px 6px;background:var(--field);
+    border:.5px solid var(--border);border-radius:5px;color:var(--muted);
+    cursor:pointer}
+  .qlist{padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
+  .qlist div{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11.5px;
+    border:.5px solid transparent;display:flex;gap:5px;align-items:baseline}
+  .qlist div:hover{background:var(--field);border-color:var(--border)}
+  .qlist div b{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
+  .qlist div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px 11px 8px}
+  .knobs{margin:0 10px 9px;padding:7px 9px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;font-size:11px}
+  .knobs table{width:100%;border-collapse:collapse}
+  .knobs td{padding:1px 0;color:var(--muted)}
+  .knobs td+td{text-align:right;color:var(--text);font-weight:600;
+    font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{flex:none;padding:10px 14px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .row{display:flex;gap:7px;align-items:center}
+  .row input[type=search]{flex:1;font:inherit;font-size:13px;padding:7px 12px;
+    background:var(--field);border:.5px solid var(--border);border-radius:9px;
+    color:var(--text);outline:none;-webkit-appearance:none}
+  .row input[type=search]:focus{border-color:var(--accent)}
+  .tools{display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap}
+  .tools .sp{flex:1}
+  .tools label{display:flex;gap:4px;align-items:center;font-size:11.5px;
+    padding:3px 8px;background:var(--field);border:.5px solid var(--border);
+    border-radius:13px;cursor:pointer}
+  .tools label.base{color:var(--base)}
+  .tools label.threshold{color:var(--threshold)}
+  .tools label.rerank{color:var(--rerank)}
+  .tools label.full{color:var(--full)}
+  .tools .note{font-size:11px;color:var(--muted)}
+
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:13px}
+  .card{background:var(--field);border:.5px solid var(--border);
+    border-radius:10px;margin-bottom:11px;overflow:hidden}
+  .card>h3{margin:0;padding:8px 11px;font-size:12px;font-weight:700;
+    display:flex;align-items:center;gap:8px;
+    border-bottom:.5px solid var(--hairline)}
+  .card.base>h3{color:var(--base)}
+  .card.threshold>h3{color:var(--threshold)}
+  .card.rerank>h3{color:var(--rerank)}
+  .card.full>h3{color:var(--full)}
+  .card>h3 .cap{font-weight:400;font-size:10.5px;color:var(--muted)}
+  .card>h3 .gold{margin-left:auto;font-weight:600;font-size:11px;
+    padding:1px 7px;border-radius:9px}
+  .card>h3 .gold.yes{background:rgba(52,199,89,.18);color:var(--ok)}
+  .card>h3 .gold.no{background:var(--danger-bg);color:var(--danger)}
+  .card .answer{padding:10px 12px;font-size:13px;white-space:pre-wrap;
+    overflow-wrap:anywhere}
+  .stages{margin:0 12px 9px;display:flex;gap:6px;flex-wrap:wrap;
+    font-size:11px;font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .stages span{padding:2px 7px;background:var(--code-bg);border-radius:5px}
+  .query{margin:0 12px 9px;font-size:11.5px;padding:5px 8px;
+    background:rgba(52,199,89,.10);border-radius:6px;overflow-wrap:anywhere}
+  .query b{color:var(--ok)}
+  /* Таблица перестановки — главное в этом дне. */
+  .moves{margin:0 12px 10px;font-size:11.5px;border-collapse:collapse;
+    width:calc(100% - 24px)}
+  .moves th{text-align:left;font-size:10px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.03em;font-weight:600;
+    padding:3px 6px;border-bottom:.5px solid var(--hairline)}
+  .moves td{padding:3px 6px;border-bottom:.5px solid var(--hairline);
+    vertical-align:top}
+  .moves td.n{font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .moves tr.used td{font-weight:600}
+  .moves .arrow{font-weight:700}
+  .moves .arrow.up{color:var(--up)}
+  .moves .arrow.down{color:var(--down)}
+  .moves .sec{color:var(--muted);font-size:11px}
+  .moves tr.gold td.where{color:var(--ok);font-weight:700}
+  .dropped{margin:0 12px 10px;font-size:11px;color:var(--muted)}
+  .dropped .ttl{font-size:10px;text-transform:uppercase;letter-spacing:.03em;
+    font-weight:600;margin-bottom:2px}
+  .dropped .one{font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    padding:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .verdict{margin:0 12px 10px;padding:6px 9px;border-radius:7px;font-size:11.5px}
+  .verdict.попал{background:rgba(52,199,89,.14);color:var(--ok)}
+  .verdict.признался{background:rgba(255,159,10,.16);color:var(--warn)}
+  .verdict.соврал{background:var(--danger-bg);color:var(--danger)}
+  .meta{margin:0 12px 10px;font-size:10.5px;color:var(--muted);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+
+  table.cmp{width:100%;border-collapse:collapse;font-size:12px}
+  table.cmp th,table.cmp td{padding:5px 7px;text-align:left;
+    border-bottom:.5px solid var(--hairline)}
+  table.cmp th{font-size:10.5px;color:var(--muted);font-weight:600;
+    text-transform:uppercase;letter-spacing:.03em}
+  table.cmp td.mid{text-align:center}
+  table.cmp td.num{text-align:right;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .mark{display:inline-grid;place-items:center;width:19px;height:19px;
+    border-radius:50%;font-size:11px;font-weight:700;color:#fff}
+  .mark.попал{background:var(--ok)}
+  .mark.признался{background:var(--warn)}
+  .mark.соврал{background:var(--danger)}
+  .place{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px}
+  .place.no{color:var(--danger);font-weight:700}
+  .summary{margin-top:11px;padding:9px 12px;background:var(--code-bg);
+    border-radius:9px}
+  .summary table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .summary th,.summary td{padding:4px 7px;text-align:left}
+  .summary th{font-size:10.5px;color:var(--muted);text-transform:uppercase}
+  .summary td.num{text-align:right;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .summary td.big{font-weight:700;font-size:13.5px}
+  .summary .final{margin-top:7px;font-size:12.5px}
+  .empty{margin:auto;text-align:center;max-width:500px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .err{background:var(--danger-bg);color:var(--danger);padding:8px 11px;
+    border-radius:8px;font-size:12px;margin-bottom:9px}
+  .waiting{display:flex;gap:7px;align-items:center;font-size:12px;
+    color:var(--muted);padding:4px 0}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1160px){.aside{width:168px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b>Второй этап</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="aside">
+      <header>Настройки</header>
+      <div class="knobs" id="knobs"></div>
+      <header>Контрольные вопросы</header>
+      <div class="qlist" id="qlist"></div>
+      <header>Недавние <button id="clearRecent">очистить</button></header>
+      <div class="qlist" id="recent"></div>
+    </nav>
+
+    <div class="main">
+      <div class="top">
+        <div class="row">
+          <input type="search" id="q" placeholder="Спросите про проект — или возьмите вопрос слева">
+          <button class="btn go" id="ask">Спросить</button>
+        </div>
+        <div class="tools" id="modeBox"></div>
+        <div class="tools">
+          <button class="btn" id="run">Прогнать 10 вопросов</button>
+          <span class="sp"></span>
+          <span class="note" id="note"></span>
+        </div>
+      </div>
+      <div class="pane" id="pane"></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>эмбеддинги <b id="emb">—</b></span>
+    <span>индекс <b id="idx">—</b></span>
+    <span>топ-K <b id="topk">—</b></span>
+    <span>порог <b id="thr">—</b></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">🔀</div>
+    <h2>Поиск находит, второй этап упорядочивает</h2>
+    <p>Берём двадцать кусков вместо пяти, отсекаем по близости и
+       переупорядочиваем моделью. В таблице у каждого куска видно место
+       в исходной выдаче и место после — подъём с восьмого на первое
+       читается одним взглядом.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const pane=$('#pane');
+let busy=false,state={},picked=new Set(['base','rerank']);
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+const num=n=>(n??0).toLocaleString('ru');
+const shortPath=p=>String(p).split('/').slice(-2).join('/');
+
+function showEmpty(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function showError(text){
+  const d=document.createElement('div');d.className='err';d.textContent=text;
+  pane.prepend(d);
+}
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const d=await r.json();
+  if(d.error){showError(d.error);return null;}
+  return d;
+}
+function waiting(text){
+  const d=document.createElement('div');d.className='waiting';
+  d.innerHTML='<div class="dots"><i></i><i></i><i></i></div><span></span>';
+  d.querySelector('span').textContent=text;
+  return d;
+}
+
+/* ── боковое ───────────────────────────────────────────────────── */
+function renderKnobs(){
+  const box=$('#knobs');
+  box.innerHTML='<table><tbody>'
+    +`<tr><td>взять из индекса</td><td>${state.wide_k??'—'}</td></tr>`
+    +`<tr><td>оставить</td><td>${state.final_k??'—'}</td></tr>`
+    +`<tr><td>порог</td><td>${state.threshold??'—'}</td></tr>`
+    +`<tr><td>стратегия</td><td>${state.strategy??'—'}</td></tr>`
+    +'</tbody></table>';
+}
+function renderModes(){
+  const box=$('#modeBox');box.replaceChildren();
+  for(const m of state.modes||[]){
+    const label=document.createElement('label');
+    label.className=m.name;
+    label.title=m.caption;
+    const input=document.createElement('input');
+    input.type='checkbox';input.checked=picked.has(m.name);
+    input.disabled=busy;
+    input.onchange=()=>{
+      input.checked?picked.add(m.name):picked.delete(m.name);
+      if(!picked.size){picked.add(m.name);input.checked=true;}};
+    label.append(input,document.createTextNode(m.name));
+    box.append(label);
+  }
+}
+function renderQuestions(){
+  const box=$('#qlist');box.replaceChildren();
+  for(const q of state.questions||[]){
+    const d=document.createElement('div');
+    d.innerHTML='<b></b><span></span>';
+    d.querySelector('b').textContent=q.n+'.';
+    d.querySelector('span').textContent=q.q;
+    d.title=q.q+'\n\nждём: '+q.expect.join('; ')+'\nисточники: '+q.sources.join(', ');
+    d.onclick=()=>{$('#q').value=q.q;ask();};
+    box.append(d);
+  }
+}
+function renderRecent(){
+  const box=$('#recent');box.replaceChildren();
+  const list=state.recent||[];
+  if(!list.length){
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'пока ничего'}));
+    return;
+  }
+  for(const text of list){
+    const d=document.createElement('div');
+    d.innerHTML='<span></span>';
+    d.querySelector('span').textContent=text;
+    d.title=text;
+    d.onclick=()=>{$('#q').value=text;ask();};
+    box.append(d);
+  }
+}
+function apply(next){
+  if(!next)return;
+  state={...state,...next};
+  $('#emb').textContent=(state.embedding_model||'—').split('/').pop();
+  const idx=state.index||{};
+  $('#idx').textContent=num(idx.chunks)+' кусков';
+  $('#topk').textContent=(state.wide_k??'—')+' → '+(state.final_k??'—');
+  $('#thr').textContent=state.threshold??'—';
+  $('#subtitle').textContent=(state.modes||[]).length+' режима · '
+    +(state.questions||[]).length+' контрольных вопросов';
+  renderKnobs();renderModes();renderQuestions();renderRecent();
+}
+
+/* ── карточка одного режима ────────────────────────────────────── */
+function card(record){
+  const retrieval=record.retrieval||{};
+  const info=(state.modes||[]).find(m=>m.name===record.mode)||{};
+  const box=document.createElement('div');
+  box.className='card '+record.mode;
+  box.innerHTML='<h3><span class="t"></span><span class="cap"></span>'
+    +'<span class="gold"></span></h3><div class="answer"></div>';
+  box.querySelector('.t').textContent=record.mode;
+  box.querySelector('.cap').textContent=info.caption||'';
+  const gold=box.querySelector('.gold');
+  if(record.gold_place===undefined){gold.remove();}
+  else{
+    gold.className='gold '+(record.gold_place?'yes':'no');
+    gold.textContent=record.gold_place
+      ?('золотой кусок №'+record.gold_place):'золотого куска нет';
+  }
+  box.querySelector('.answer').textContent=(record.text||'(пусто)').trim();
+
+  const stages=document.createElement('div');stages.className='stages';
+  for(const s of retrieval.stages||[]){
+    const span=document.createElement('span');
+    let text=s.stage;
+    if(s.stage==='search')text+=' '+s.got;
+    else if('before' in s)text+=' '+s.before+'→'+s.after;
+    else if('after' in s)text+=' '+s.after;
+    if(s.stage==='threshold')text+=' ('+s.value+')';
+    span.textContent=text;stages.append(span);
+  }
+  box.append(stages);
+
+  if(retrieval.rewritten){
+    const q=document.createElement('div');q.className='query';
+    q.innerHTML='<b>запрос переписан:</b> ';
+    q.append(document.createTextNode(retrieval.query||''));
+    box.append(q);
+  }
+
+  if(record.verdict){
+    const v=document.createElement('div');
+    v.className='verdict '+record.verdict;
+    const why={'попал':'ответ содержит ожидаемое',
+      'признался':'честно сказал, что не знает',
+      'соврал':'ответил уверенно, но не то'}[record.verdict];
+    v.textContent=record.verdict+' — '+why
+      +(record.expect?' (ждали: '+record.expect.join('; ')+')':'')
+      +(record.sources_ok!==undefined
+        ?(record.sources_ok?' · источники верны':' · источники не те'):'');
+    box.append(v);
+  }
+
+  const hits=retrieval.hits||[];
+  if(hits.length){
+    const table=document.createElement('table');table.className='moves';
+    table.innerHTML='<thead><tr><th>в промпте</th><th>было в поиске</th>'
+      +'<th>оценка</th><th>откуда</th></tr></thead><tbody></tbody>';
+    const body=table.querySelector('tbody');
+    for(const[position,hit]of hits.entries()){
+      const used=(record.cited||[]).includes(position+1);
+      const isGold=record.gold_place===position+1;
+      const tr=document.createElement('tr');
+      if(used)tr.className='used';
+      if(isGold)tr.className+=' gold';
+      const moved=hit.rank-(position+1);
+      const arrow=moved>0?'↑':moved<0?'↓':'·';
+      const cls=moved>0?'up':moved<0?'down':'';
+      tr.innerHTML='<td class="n where"></td><td class="n"></td>'
+        +'<td class="n sc"></td><td></td>';
+      tr.querySelector('.where').textContent=(used?'→ ':'  ')+'['+(position+1)+']';
+      tr.children[1].innerHTML=`№${hit.rank} <span class="arrow ${cls}">${arrow}</span>`;
+      tr.querySelector('.sc').textContent=hit.rerank_score!==null
+        &&hit.rerank_score!==undefined
+        ?('реранк '+hit.rerank_score):hit.score.toFixed(3);
+      tr.children[3].innerHTML='<span></span><div class="sec"></div>';
+      tr.children[3].querySelector('span').textContent=shortPath(hit.source);
+      tr.children[3].querySelector('.sec').textContent=hit.section;
+      body.append(tr);
+    }
+    box.append(table);
+  }
+
+  const dropped=(retrieval.considered||[]).filter(h=>h.dropped_by);
+  if(dropped.length){
+    const d=document.createElement('div');d.className='dropped';
+    d.innerHTML='<div class="ttl">отсеклось ('+dropped.length+')</div>';
+    for(const hit of dropped.slice(0,6)){
+      const one=document.createElement('div');one.className='one';
+      one.textContent=`${hit.dropped_by}  ${hit.score.toFixed(3)}  `
+        +`${shortPath(hit.source)} «${hit.section}»`;
+      d.append(one);
+    }
+    if(dropped.length>6){
+      const more=document.createElement('div');more.className='one';
+      more.textContent='… и ещё '+(dropped.length-6);
+      d.append(more);
+    }
+    box.append(d);
+  }
+
+  const meta=document.createElement('div');meta.className='meta';
+  meta.textContent=`второй этап ${record.stage_tokens} ток. · `
+    +`ответ ${record.answer_tokens} ток. · всего ${record.total_tokens} · `
+    +`${record.seconds}с`;
+  box.append(meta);
+  return box;
+}
+
+async function ask(){
+  const question=$('#q').value.trim();
+  if(!question||busy){if(!question)$('#q').focus();return;}
+  busy=true;lock();
+  pane.replaceChildren();
+  const wait=waiting('режимов выбрано '+picked.size+', считаю…');
+  pane.append(wait);
+  try{
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question,modes:[...picked]})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.answer)pane.insertBefore(card(m.answer),wait);
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+async function runAll(){
+  if(busy)return;
+  busy=true;lock();
+  pane.replaceChildren();
+  const modes=[...picked];
+  const table=document.createElement('table');table.className='cmp';
+  table.innerHTML='<thead><tr><th>#</th><th>вопрос</th>'
+    +modes.map(m=>`<th class="mid">${m}</th>`).join('')
+    +'</tr></thead><tbody></tbody>';
+  pane.append(table);
+  const body=table.querySelector('tbody');
+  const wait=waiting('10 вопросов × '+modes.length+' режима, это несколько минут…');
+  pane.append(wait);
+  const mark=v=>{
+    const s=document.createElement('span');
+    s.className='mark '+v;
+    s.textContent=v==='попал'?'✓':v==='признался'?'?':'✗';
+    s.title=v;return s;};
+  try{
+    const res=await fetch('/evaluate',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({modes})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.row){
+          const tr=document.createElement('tr');
+          const cells=['<td class="num"></td>','<td class="qq"></td>']
+            .concat(modes.map(()=>'<td class="mid"></td>'));
+          tr.innerHTML=cells.join('');
+          tr.children[0].textContent=m.row.n;
+          tr.children[1].textContent=m.row.question;
+          tr.children[1].title='ждали: '+m.row.expect.join('; ');
+          modes.forEach((mode,i)=>{
+            const cell=tr.children[2+i];
+            const data=m.row.modes[mode];
+            cell.append(mark(data.verdict));
+            const place=document.createElement('div');
+            place.className='place'+(data.gold_place?'':' no');
+            place.textContent=data.gold_place?('№'+data.gold_place):'нет';
+            place.title='место золотого куска в промпте';
+            cell.append(place);
+          });
+          body.append(tr);
+        }
+        if(m.summary){
+          wait.remove();
+          const total=m.total;
+          const box=document.createElement('div');box.className='summary';
+          let html='<table><thead><tr><th>режим</th><th>золотой в промпте</th>'
+            +'<th>попал</th><th>признался</th><th>соврал</th>'
+            +'<th>второй этап</th><th>токенов</th></tr></thead><tbody>';
+          for(const mode of m.modes){
+            const t=m.summary[mode];
+            html+=`<tr><td>${mode}</td>`
+              +`<td class="num big">${t.context}/${total}</td>`
+              +`<td class="num big">${t['попал']}/${total}</td>`
+              +`<td class="num">${t['признался']}</td>`
+              +`<td class="num">${t['соврал']}</td>`
+              +`<td class="num">${num(t.stage_tokens)}</td>`
+              +`<td class="num">${num(t.tokens)}</td></tr>`;
+          }
+          html+='</tbody></table>';
+          box.innerHTML=html;
+          const first=m.summary[m.modes[0]],last=m.summary[m.modes.at(-1)];
+          if(m.modes.length>1){
+            const f=document.createElement('div');f.className='final';
+            const ratio=(last.tokens/Math.max(1,first.tokens)).toFixed(1);
+            f.innerHTML=`От <b>${m.modes[0]}</b> к <b>${m.modes.at(-1)}</b>: `
+              +`золотой кусок в промпте ${first.context}/${total} → `
+              +`<b>${last.context}/${total}</b>, правильных ответов `
+              +`${first['попал']}/${total} → <b>${last['попал']}/${total}</b>, `
+              +`токенов в ${ratio} раза больше.`;
+            box.append(f);
+          }
+          pane.append(box);
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+function lock(){
+  for(const id of['ask','run'])$('#'+id).disabled=busy;
+  renderModes();
+}
+$('#ask').addEventListener('click',ask);
+$('#q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();ask();}});
+$('#run').addEventListener('click',runAll);
+$('#clearRecent').addEventListener('click',async()=>{
+  const d=await post('/recent/clear');if(d)apply(d);});
+
+fetch('/state').then(r=>r.json()).then(d=>{
+  apply(d);
+  $('#note').textContent=`топ-${d.wide_k} до фильтрации → ${d.final_k} после`;
+  showEmpty();
+}).catch(()=>showEmpty());
+</script>
+</body>
+</html>
