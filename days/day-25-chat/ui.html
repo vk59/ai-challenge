@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мини-чат с RAG и памятью задачи</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --bubble:#e9e9eb;--field:#fff;--border:rgba(0,0,0,.12);
+    --hairline:rgba(0,0,0,.08);--accent:#007aff;--code-bg:rgba(0,0,0,.05);
+    --danger:#d70015;--danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--warn:#ff9f0a;--goal:#5e5ce6;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --bubble:#3a3a3c;--field:#2c2c2e;--border:rgba(255,255,255,.14);
+    --hairline:rgba(255,255,255,.10);--accent:#0a84ff;--code-bg:rgba(255,255,255,.07);
+    --danger:#ff6961;--danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--warn:#ffb340;--goal:#7d7aff;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1340px);height:min(100%,840px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:24px;padding:0 11px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  .body{flex:1;min-height:0;display:flex}
+  .chats{flex:none;width:170px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column}
+  .chats header{flex:none;display:flex;align-items:center;padding:9px 10px 7px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .chats header button{margin-left:auto;width:22px;height:22px;display:grid;
+    place-items:center;font-size:15px;line-height:1;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;padding:0}
+  .chatlist{flex:1;min-height:0;overflow-y:auto;padding:0 7px 9px;
+    display:flex;flex-direction:column;gap:2px}
+  .chat{display:flex;align-items:center;gap:5px;padding:6px 8px;border-radius:7px;
+    cursor:pointer;border:.5px solid transparent}
+  .chat:hover{background:var(--field)}
+  .chat.active{background:var(--field);border-color:var(--border)}
+  .chat .info{flex:1;min-width:0}
+  .chat .t{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chat.active .t{font-weight:600}
+  .chat .s{font-size:10px;color:var(--muted);overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .chat .x{flex:none;opacity:0;color:var(--muted);font-size:12px;padding:0 2px}
+  .chat:hover .x{opacity:.55}
+  .chat .x:hover{opacity:1;color:var(--danger)}
+  .chat input{width:100%;font:inherit;font-size:12px;padding:1px 4px;
+    background:var(--canvas);border:.5px solid var(--accent);border-radius:4px;
+    color:var(--text);outline:none}
+  .hint{padding:0 10px 9px;font-size:10px;color:var(--muted);line-height:1.35}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .transcript{flex:1;min-height:0;overflow-y:auto;padding:14px;
+    display:flex;flex-direction:column;gap:9px}
+  .msg{display:flex;flex-direction:column}
+  .msg.me{align-items:flex-end}.msg.bot{align-items:flex-start}
+  .bubble{max-width:88%;padding:8px 13px;border-radius:17px;overflow-wrap:anywhere}
+  .me .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:5px;
+    white-space:pre-wrap}
+  .bot .bubble{background:var(--bubble);border-bottom-left-radius:5px;
+    white-space:pre-wrap}
+  .bot .bubble.refused{background:rgba(255,159,10,.16)}
+  .bot .bubble.gated{background:var(--danger-bg)}
+  .bot .bubble.error{background:var(--danger-bg);color:var(--danger)}
+  .query{max-width:88%;font-size:11px;color:var(--muted);padding:2px 10px;
+    background:var(--code-bg);border-radius:9px;overflow-wrap:anywhere}
+  .query b{color:var(--text);font-weight:600}
+  .srcs{max-width:88%;font-size:11px;padding:5px 10px;background:var(--code-bg);
+    border-radius:8px}
+  .srcs .ttl{color:var(--muted);font-size:10px;text-transform:uppercase;
+    letter-spacing:.03em;font-weight:600;margin-bottom:2px}
+  .srcs .one{font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    overflow-wrap:anywhere}
+  .srcs .q{margin-top:3px;color:var(--muted);font-style:italic}
+  .srcs .q.bad{color:var(--danger);font-style:normal}
+  .tokens{font-size:10.5px;color:var(--muted);padding:0 10px}
+  .thinking{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+  .empty{margin:auto;text-align:center;max-width:480px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .composer{flex:none;display:flex;align-items:flex-end;gap:8px;padding:9px 12px;
+    background:var(--chrome);border-top:.5px solid var(--hairline)}
+  .composer textarea{flex:1;resize:none;max-height:100px;padding:7px 12px;font:inherit;
+    color:var(--text);background:var(--field);border:.5px solid var(--border);
+    border-radius:16px;outline:none}
+  .send{flex:none;width:30px;height:30px;display:grid;place-items:center;font-size:15px;
+    color:#fff;background:var(--accent);border:0;border-radius:50%;cursor:pointer}
+  .send:disabled{background:var(--bubble);color:var(--muted);cursor:default}
+
+  /* Память задачи — главная панель этого дня. */
+  .side{flex:none;width:276px;border-left:.5px solid var(--hairline);
+    background:var(--chrome);display:flex;flex-direction:column;overflow-y:auto}
+  .side header{flex:none;display:flex;align-items:center;padding:10px 12px 6px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .side header button{margin-left:auto;font:inherit;font-size:10.5px;
+    text-transform:none;letter-spacing:0;padding:2px 7px;background:var(--field);
+    border:.5px solid var(--border);border-radius:5px;color:var(--muted);
+    cursor:pointer}
+  .goal{margin:0 11px 9px;padding:8px 10px;border-radius:8px;
+    background:color-mix(in srgb,var(--goal) 14%,transparent);
+    border:.5px solid color-mix(in srgb,var(--goal) 40%,transparent)}
+  .goal .ttl{font-size:10px;text-transform:uppercase;letter-spacing:.03em;
+    font-weight:700;color:var(--goal);margin-bottom:2px}
+  .goal .v{font-size:12.5px;font-weight:600;overflow-wrap:anywhere}
+  .goal.changed{animation:pulse 1s ease-out}
+  @keyframes pulse{0%{background:color-mix(in srgb,var(--goal) 42%,transparent)}
+    100%{background:color-mix(in srgb,var(--goal) 14%,transparent)}}
+  .mem{margin:0 11px 9px}
+  .mem .ttl{font-size:10px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.03em;font-weight:600;margin-bottom:3px}
+  .mem .item{font-size:11.5px;padding:4px 8px;margin-bottom:3px;
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    overflow-wrap:anywhere}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px 12px 8px}
+  .scen{margin:0 11px 9px}
+  .scen button{width:100%;text-align:left;font:inherit;font-size:11.5px;
+    padding:6px 9px;margin-bottom:4px;color:var(--text);background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;cursor:pointer}
+  .scen button:hover{border-color:var(--accent)}
+  .scen button:disabled{opacity:.45;cursor:default}
+  .scen button b{display:block;font-size:12px}
+  .scen button span{color:var(--muted);font-size:10.5px}
+
+  table.run{width:100%;border-collapse:collapse;font-size:11.5px}
+  table.run th,table.run td{padding:4px 6px;text-align:left;
+    border-bottom:.5px solid var(--hairline);vertical-align:top}
+  table.run th{font-size:10px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.03em;font-weight:600}
+  table.run td.mid{text-align:center}
+  .tick{font-weight:700}
+  .tick.yes{color:var(--ok)}.tick.no{color:var(--danger)}
+  .tick.dash{color:var(--muted)}
+  .runsum{margin-top:10px;padding:9px 12px;background:var(--code-bg);
+    border-radius:9px;font-size:12.5px}
+  .runsum table{width:100%;border-collapse:collapse}
+  .runsum td{padding:3px 0}
+  .runsum td+td{text-align:right;font-weight:700;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .runsum td.bad+td{color:var(--danger)}
+  .err{background:var(--danger-bg);color:var(--danger);padding:8px 11px;
+    border-radius:8px;font-size:12px;margin-bottom:9px}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1180px){.side{width:244px}.chats{width:148px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b id="chatTitle">Мини-чат с RAG</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="chats">
+      <header>Чаты <button id="newChatBtn" title="Новый чат">+</button></header>
+      <div class="chatlist" id="chatList"></div>
+      <div class="hint">двойной клик — переименовать<br>✕ — удалить</div>
+    </nav>
+
+    <div class="main">
+      <div class="transcript" id="transcript"></div>
+      <footer class="composer">
+        <textarea id="prompt" rows="1" placeholder="Спросите про проект — уточнения тоже понимает…"></textarea>
+        <button class="send" id="send" disabled title="Отправить (Enter)">↑</button>
+      </footer>
+    </div>
+
+    <aside class="side">
+      <header>Память задачи <button id="forget">забыть</button></header>
+      <div id="task"></div>
+      <header>Длинные сценарии</header>
+      <div class="scen" id="scen"></div>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span>индекс <b id="idx">—</b></span>
+    <span>порог отказа <b id="thr">—</b></span>
+    <span>истории в запрос <b id="hist">—</b></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">💬</div>
+    <h2>Чат, который помнит задачу</h2>
+    <p>Спросите что-нибудь, а потом уточните: «а почему?», «сколько именно?».
+       Такие реплики искать в индексе нечего — перед поиском они
+       раскрываются по истории и цели. Цель и ограничения видны справа
+       и живут между запусками.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const transcript=$('#transcript'),promptEl=$('#prompt'),sendEl=$('#send');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+const num=n=>(n??0).toLocaleString('ru');
+const scroll=()=>transcript.scrollTo({top:transcript.scrollHeight,behavior:'smooth'});
+
+function showEmpty(){transcript.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function addMsg(who,kind){
+  const e=transcript.querySelector('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className='msg '+who;
+  d.innerHTML='<div class="bubble'+(kind?' '+kind:'')+'"></div>';
+  transcript.append(d);return d.firstElementChild;
+}
+function addBlock(cls,html){
+  const e=transcript.querySelector('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className=cls;d.innerHTML=html;
+  transcript.append(d);return d;
+}
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const d=await r.json();
+  if(d.error){alert(d.error);return null;}
+  return d;
+}
+
+/* ── память задачи ─────────────────────────────────────────────── */
+function renderTask(changed){
+  const box=$('#task');box.replaceChildren();
+  const task=state.task||{};
+  const goal=document.createElement('div');
+  goal.className='goal'+(changed?' changed':'');
+  goal.innerHTML='<div class="ttl">цель диалога</div><div class="v"></div>';
+  goal.querySelector('.v').textContent=task.goal||'ещё не определена';
+  box.append(goal);
+  for(const[key,title]of[['clarified','что уточнил пользователь'],
+                         ['constraints','зафиксировано']]){
+    const items=task[key]||[];
+    if(!items.length)continue;
+    const d=document.createElement('div');d.className='mem';
+    d.innerHTML='<div class="ttl"></div>';
+    d.querySelector('.ttl').textContent=title;
+    for(const item of items){
+      const one=document.createElement('div');one.className='item';
+      one.textContent=item;d.append(one);
+    }
+    box.append(d);
+  }
+  if(!task.goal&&!(task.clarified||[]).length)
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'заполнится после первой реплики'}));
+}
+function renderScenarios(){
+  const box=$('#scen');box.replaceChildren();
+  for(const s of state.scenarios||[]){
+    const b=document.createElement('button');
+    b.disabled=busy;
+    b.innerHTML='<b></b><span></span>';
+    b.querySelector('b').textContent=s.n+'. '+s.name;
+    b.querySelector('span').textContent=s.messages+' реплик · цель по словам: '
+      +s.goal_words.slice(0,3).join(', ');
+    b.onclick=()=>runScenario(s.n);
+    box.append(b);
+  }
+}
+function renderChats(){
+  const list=$('#chatList');list.replaceChildren();
+  for(const c of state.chats||[]){
+    const d=document.createElement('div');
+    d.className='chat'+(c.active?' active':'');
+    d.innerHTML='<div class="info"><div class="t"></div><div class="s"></div></div>'
+               +'<span class="x">✕</span>';
+    d.querySelector('.t').textContent=c.title||c.name;
+    d.querySelector('.s').textContent=c.goal||((c.pairs||0)+' пар');
+    d.title=c.goal||'';
+    d.onclick=e=>{if(!e.target.classList.contains('x'))openChat(c.name);};
+    d.ondblclick=e=>{e.stopPropagation();if(c.active)startRename(d,c);};
+    d.querySelector('.x').onclick=async e=>{
+      e.stopPropagation();
+      if(!confirm('Удалить чат «'+(c.title||c.name)+'»?'))return;
+      const r=await post('/chat/delete',{session:c.name});
+      if(r){apply(r);renderHistory(r.history);}};
+    list.append(d);
+  }
+}
+function startRename(el,c){
+  const info=el.querySelector('.info');const was=info.innerHTML;
+  const inp=document.createElement('input');inp.value=c.name;
+  info.replaceChildren(inp);inp.focus();inp.select();
+  const finish=async(save)=>{
+    const name=inp.value.trim();info.innerHTML=was;
+    if(!save||!name||name===c.name)return;
+    const r=await post('/chat/rename',{title:name});if(r)apply(r);};
+  inp.onkeydown=e=>{if(e.key==='Enter')finish(true);if(e.key==='Escape')finish(false);};
+  inp.onblur=()=>finish(true);
+}
+async function openChat(name){
+  const d=await post('/session',{session:name});
+  if(!d)return;apply(d);renderHistory(d.history);sync();promptEl.focus();
+}
+async function newChat(){
+  const taken=new Set((state.chats||[]).map(c=>c.name));
+  let n=taken.size+1,name='чат-'+n;
+  while(taken.has(name))name='чат-'+(++n);
+  await openChat(name);
+}
+
+function apply(next){
+  if(!next)return;
+  const changed=next.task&&state.task
+    &&next.task.goal!==state.task.goal&&next.task.goal;
+  state={...state,...next};
+  const idx=state.index||{};
+  $('#idx').textContent=num(idx.chunks)+' кусков';
+  $('#thr').textContent=state.threshold??'—';
+  $('#hist').textContent=(state.history_for_rewrite??'—')+' пар';
+  const chat=(state.chats||[]).find(c=>c.active);
+  $('#chatTitle').textContent=chat?(chat.title||chat.name):'Мини-чат с RAG';
+  $('#subtitle').textContent=(state.task||{}).goal||'цель ещё не определена';
+  renderTask(changed);renderScenarios();renderChats();
+}
+function renderHistory(history){
+  transcript.replaceChildren();
+  if(!history||!history.length){showEmpty();return;}
+  for(const turn of history){
+    const b=addMsg(turn.role==='user'?'me':'bot');
+    b.textContent=turn.content;
+  }
+  transcript.scrollTop=transcript.scrollHeight;
+}
+
+/* ── источники под ответом ─────────────────────────────────────── */
+function sourcesBlock(reply){
+  const cited=reply.cited||{};
+  const sources=cited.sources||[],quotes=cited.quotes||[];
+  if(!sources.length&&!quotes.length)return null;
+  const box=document.createElement('div');box.className='srcs';
+  box.innerHTML='<div class="ttl">источники</div>';
+  for(const s of sources){
+    const d=document.createElement('div');d.className='one';
+    d.textContent='['+s.n+'] '+s.chunk_id;
+    d.title=s.source+' · '+s.section;
+    box.append(d);
+  }
+  for(const q of quotes){
+    const d=document.createElement('div');
+    d.className='q'+(q.verified?'':' bad');
+    d.textContent=(q.verified?'« ':'✗ выдумка: « ')
+      +(q.text||'').trim().slice(0,170)+' »';
+    box.append(d);
+  }
+  return box;
+}
+
+async function send(){
+  const message=promptEl.value.trim();
+  if(!message||busy)return;
+  busy=true;promptEl.value='';grow();sync();renderScenarios();
+  addMsg('me').textContent=message;
+  const wait=document.createElement('div');wait.className='thinking';
+  wait.innerHTML='<div class="dots"><i></i><i></i><i></i></div>'
+    +'<span>раскрываю вопрос и ищу…</span>';
+  transcript.append(wait);scroll();
+  try{
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){wait.remove();addMsg('bot','error').textContent=m.error;break;}
+        if(m.reply){
+          wait.remove();
+          const r=m.reply,cited=r.cited||{};
+          if(r.rewritten)
+            addBlock('query','<b>искал:</b> '
+              +r.query.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])));
+          const kind=cited.abstained?'gated'
+            :(cited.confident?'':'refused');
+          addMsg('bot',kind).textContent=(r.answer||'(пусто)').trim();
+          const srcs=sourcesBlock(r);
+          if(srcs)transcript.append(srcs);
+          const bits=[r.total_tokens+' токенов'];
+          if(cited.blank_retries)bits.push('пустых ответов: '+cited.blank_retries);
+          if(cited.retried)bits.push('повтор за цитатами');
+          if(r.rewrite_tokens)bits.push('раскрытие '+r.rewrite_tokens);
+          if(r.task_tokens)bits.push('память задачи '+r.task_tokens);
+          addBlock('tokens',bits.join(' · '));
+          scroll();
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){wait.remove();addMsg('bot','error').textContent=String(e.message||e);}
+  finally{wait.remove();busy=false;sync();renderScenarios();scroll();
+    promptEl.focus();}
+}
+
+/* ── прогон сценария ───────────────────────────────────────────── */
+async function runScenario(number){
+  if(busy)return;
+  busy=true;sync();renderScenarios();
+  transcript.replaceChildren();
+  const table=document.createElement('table');table.className='run';
+  table.innerHTML='<thead><tr><th>#</th><th>реплика</th>'
+    +'<th class="mid">ист.</th><th class="mid">цель</th>'
+    +'<th class="mid">раскр.</th><th>цель диалога</th>'
+    +'</tr></thead><tbody></tbody>';
+  transcript.append(table);
+  const body=table.querySelector('tbody');
+  const wait=document.createElement('div');wait.className='thinking';
+  wait.innerHTML='<div class="dots"><i></i><i></i><i></i></div>'
+    +'<span>прогоняю сценарий, это несколько минут…</span>';
+  transcript.append(wait);
+  const tick=(ok,dash)=>dash?'<span class="tick dash">—</span>'
+    :`<span class="tick ${ok?'yes':'no'}">${ok?'✓':'✗'}</span>`;
+  try{
+    const res=await fetch('/scenario',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({n:number})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){wait.remove();
+          transcript.prepend(Object.assign(document.createElement('div'),
+            {className:'err',textContent:m.error}));break;}
+        if(m.scenario)
+          wait.querySelector('span').textContent=
+            `${m.scenario.name}: ${m.scenario.total} реплик…`;
+        if(m.step){
+          const s=m.step;
+          const tr=document.createElement('tr');
+          tr.innerHTML='<td></td><td class="q"></td>'
+            +`<td class="mid">${tick(s.has_sources,!s.needed_sources)}</td>`
+            +`<td class="mid">${tick(s.goal_kept,s.goal_kept===null)}</td>`
+            +`<td class="mid">${s.rewritten?'↻':'·'}</td>`
+            +'<td class="g"></td>';
+          tr.children[0].textContent=s.n;
+          tr.children[1].textContent=s.message;
+          tr.children[1].title=(s.rewritten?'искал: '+s.query+'\n\n':'')
+            +s.answer;
+          tr.querySelector('.g').textContent=s.goal||'';
+          body.append(tr);
+          transcript.scrollTop=transcript.scrollHeight;
+        }
+        if(m.tally){
+          wait.remove();
+          const t=m.tally;
+          const box=document.createElement('div');box.className='runsum';
+          box.innerHTML='<table><tbody>'
+            +`<tr><td>реплик</td><td>${t.turns}</td></tr>`
+            +`<tr><td class="${t.got<t.needed?'bad':''}">источники у уверенных ответов</td>`
+            +`<td>${t.got}/${t.needed}</td></tr>`
+            +`<tr><td class="${t.goal_kept<t.goal_checked?'bad':''}">цель не потеряна</td>`
+            +`<td>${t.goal_kept}/${t.goal_checked}</td></tr>`
+            +`<tr><td>уточнений раскрыто</td><td>${t.rewritten}</td></tr>`
+            +`<tr><td>цитат подтверждено</td><td>${t.verified}</td></tr>`
+            +`<tr><td class="${t.fabricated?'bad':''}">выдуманных цитат</td>`
+            +`<td>${t.fabricated}</td></tr>`
+            +`<tr><td class="${t.blanks?'bad':''}">пустых ответов модели</td>`
+            +`<td>${t.blanks}</td></tr>`
+            +`<tr><td>отказов</td><td>${t.refusals}</td></tr>`
+            +`<tr><td>токенов</td><td>${num(t.tokens)}</td></tr>`
+            +'</tbody></table>';
+          transcript.append(box);
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){wait.remove();
+    transcript.prepend(Object.assign(document.createElement('div'),
+      {className:'err',textContent:String(e.message||e)}));}
+  finally{wait.remove();busy=false;sync();renderScenarios();}
+}
+
+function sync(){sendEl.disabled=busy||!promptEl.value.trim();}
+function grow(){promptEl.style.height='auto';
+  promptEl.style.height=promptEl.scrollHeight+'px';}
+promptEl.addEventListener('input',()=>{grow();sync();});
+promptEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+sendEl.addEventListener('click',send);
+$('#newChatBtn').addEventListener('click',newChat);
+$('#forget').addEventListener('click',async()=>{
+  if(!confirm('Очистить память задачи этого чата?'))return;
+  const d=await post('/task/forget');if(d)apply(d);});
+
+fetch('/state').then(r=>r.json()).then(d=>{
+  apply(d);renderHistory(d.history);
+}).catch(()=>showEmpty());
+</script>
+</body>
+</html>

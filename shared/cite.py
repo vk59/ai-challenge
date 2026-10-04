@@ -67,6 +67,11 @@ SYSTEM = """Ты отвечаешь на вопросы о проекте «AI A
 
 {excerpts}"""
 
+REMINDER = """Ты ответил без цитат. Это запрещено: перечитай выдержки
+и верни тот же ответ, но с заполненными "sources" и "quotes" — дословными
+фрагментами из выдержек. Если подтвердить ответ цитатами нельзя, поставь
+"confident": false и скажи, что в документах этого нет."""
+
 CLARIFY_TEMPLATE = (
     "Не знаю — в документации проекта ничего близкого к этому вопросу "
     "не нашлось (лучшее совпадение {score:.2f} при пороге {threshold:.2f}).\n\n"
@@ -128,6 +133,9 @@ class CitedAnswer:
     top_score: float = 0.0
     raw: str = ""
     parse_failed: bool = False
+    retried: bool = False
+    blank: bool = False              # модель вернула одни пробелы
+    blank_retries: int = 0
     usage: dict = field(default_factory=dict)
     seconds: float = 0.0
 
@@ -151,6 +159,14 @@ class CitedAnswer:
     def total_tokens(self) -> int:
         return int(self.usage.get("total_tokens") or 0)
 
+    @property
+    def prompt_tokens(self) -> int:
+        return int(self.usage.get("prompt_tokens") or 0)
+
+    @property
+    def answer_tokens(self) -> int:
+        return int(self.usage.get("completion_tokens") or 0)
+
     def as_dict(self) -> dict:
         return {"question": self.question, "answer": self.answer,
                 "confident": self.confident, "abstained": self.abstained,
@@ -161,6 +177,8 @@ class CitedAnswer:
                 "verified_quotes": self.verified_quotes,
                 "fabricated_quotes": self.fabricated_quotes,
                 "parse_failed": self.parse_failed,
+                "retried": self.retried, "blank": self.blank,
+                "blank_retries": self.blank_retries,
                 "total_tokens": self.total_tokens,
                 "seconds": round(self.seconds, 2)}
 
@@ -241,11 +259,25 @@ def answer_with_citations(
         strategy: str = STRUCTURAL, k: int = 5,
         abstain_below: float | None = ABSTAIN_BELOW,
         retrieval=None, max_tokens: int = 900,
-        temperature: float = 0.1) -> CitedAnswer:
+        temperature: float = 0.1,
+        system_prefix: str | None = None,
+        history: list[dict] | None = None,
+        require_citations: bool = False) -> CitedAnswer:
     """Вопрос → ответ с проверенными цитатами, либо честный отказ.
 
-    `retrieval` позволяет подставить готовую выдачу — например из дня 23,
+    `retrieval` подставляет готовую выдачу — например из дня 23,
     с реранкингом. Тогда поиск здесь не делается повторно.
+
+    `system_prefix` и `history` добавлены в дне 25: в диалоге ответ зависит
+    не только от выдержек, но и от того, о чём уже говорили и какова цель.
+    Требования к цитатам при этом не меняются — приставка идёт ПЕРЕД
+    правилами, а не вместо них.
+
+    `require_citations` — оттуда же. С длинной историей модель иногда
+    отвечает уверенно, но поля "sources" и "quotes" оставляет пустыми:
+    контекст разговора перетягивает внимание с формата. Один повторный
+    запрос с прямым напоминанием это исправляет. По умолчанию выключено,
+    чтобы поведение дня 24 не менялось.
     """
     import time
 
@@ -274,10 +306,35 @@ def answer_with_citations(
                            f"{abstain_below:.2f}",
             chunks=chunks, top_score=top)
 
+    system = SYSTEM.format(excerpts=build_excerpts(chunks))
+    if system_prefix:
+        system = f"{system_prefix.strip()}\n\n{system}"
+
     started = time.monotonic()
-    reply = ask(question, system=SYSTEM.format(excerpts=build_excerpts(chunks)),
+    reply = ask(question, system=system, history=history,
                 max_tokens=max_tokens, temperature=temperature, json_mode=True)
+
+    # Пустой ответ. Модель изредка возвращает одни пробелы — попался
+    # в дне 25 на трёх репликах из двенадцати в длинном диалоге, причём
+    # в двадцати изолированных попытках с тем же промптом, историей
+    # и приставкой не воспроизвёлся ни разу. Причину изолировать
+    # не удалось, поэтому обнаруживаем и повторяем: пустой ответ
+    # пользователю хуже лишнего запроса.
+    blank_retries = 0
+    while not (reply.text or "").strip() and blank_retries < 2:
+        blank_retries += 1
+        reply = ask(question, system=system, history=history,
+                    max_tokens=max_tokens, temperature=temperature,
+                    json_mode=True)
     spent = time.monotonic() - started
+
+    if not (reply.text or "").strip():
+        return CitedAnswer(
+            question=question,
+            answer="Модель вернула пустой ответ — попробуйте спросить ещё раз.",
+            confident=False, chunks=chunks, top_score=top,
+            raw=reply.text or "", parse_failed=True, blank=True,
+            blank_retries=blank_retries, usage=reply.usage, seconds=spent)
 
     data = _parse(reply.text)
     if data is None:
@@ -328,11 +385,32 @@ def answer_with_citations(
             known.add(quote.n)
     sources.sort(key=lambda s: s.n)
 
-    return CitedAnswer(
+    result = CitedAnswer(
         question=question, answer=str(data.get("answer") or "").strip(),
         confident=bool(data.get("confident", True)),
         sources=sources, quotes=quotes, chunks=chunks, top_score=top,
-        raw=reply.text or "", usage=reply.usage, seconds=spent)
+        raw=reply.text or "", blank_retries=blank_retries,
+        usage=reply.usage, seconds=spent)
+
+    # Уверенный ответ без цитат — нарушение договора. Просим один раз
+    # исправиться, рекурсией с выключенным флагом, чтобы не зациклиться.
+    if require_citations and result.confident and not result.quotes:
+        again = answer_with_citations(
+            question, index=index, strategy=strategy, k=k,
+            abstain_below=None, retrieval=retrieval, max_tokens=max_tokens,
+            temperature=temperature,
+            system_prefix=f"{system_prefix or ''}\n\n{REMINDER}".strip(),
+            history=history, require_citations=False)
+        again.retried = True
+        again.usage = {
+            key: int(result.usage.get(key) or 0) + int(again.usage.get(key) or 0)
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+        again.seconds += result.seconds
+        # Если и со второго раза цитат нет — отдаём вторую попытку как есть:
+        # врать про успех нельзя, зато видно, что попытка была.
+        return again
+
+    return result
 
 
 __all__ = ["answer_with_citations", "CitedAnswer", "Quote", "Source",
