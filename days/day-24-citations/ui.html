@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Цитаты — ответы с проверяемыми источниками</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --field:#fff;--border:rgba(0,0,0,.12);--hairline:rgba(0,0,0,.08);
+    --accent:#007aff;--code-bg:rgba(0,0,0,.05);--danger:#d70015;
+    --danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--warn:#ff9f0a;--mark:rgba(52,199,89,.28);
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --field:#2c2c2e;--border:rgba(255,255,255,.14);--hairline:rgba(255,255,255,.10);
+    --accent:#0a84ff;--code-bg:rgba(255,255,255,.07);--danger:#ff6961;
+    --danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--warn:#ffb340;--mark:rgba(48,209,88,.30);
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1340px);height:min(100%,840px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:24px;padding:0 11px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn.go{background:var(--accent);border-color:transparent;color:#fff}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  .body{flex:1;min-height:0;display:flex}
+  .aside{flex:none;width:200px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column;
+    overflow-y:auto}
+  .aside header{flex:none;display:flex;align-items:center;padding:9px 11px 6px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .aside header button{margin-left:auto;font:inherit;font-size:10.5px;
+    text-transform:none;letter-spacing:0;padding:1px 6px;background:var(--field);
+    border:.5px solid var(--border);border-radius:5px;color:var(--muted);
+    cursor:pointer}
+  .qlist{padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
+  .qlist div{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11.5px;
+    border:.5px solid transparent;display:flex;gap:5px;align-items:baseline}
+  .qlist div:hover{background:var(--field);border-color:var(--border)}
+  .qlist div b{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
+  .qlist div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .qlist.alien div b{color:var(--danger)}
+  .qlist.nearby div b{color:var(--warn)}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px 11px 8px}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{flex:none;padding:10px 14px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .row{display:flex;gap:7px;align-items:center}
+  .row input[type=search]{flex:1;font:inherit;font-size:13px;padding:7px 12px;
+    background:var(--field);border:.5px solid var(--border);border-radius:9px;
+    color:var(--text);outline:none;-webkit-appearance:none}
+  .row input[type=search]:focus{border-color:var(--accent)}
+  .tools{display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap}
+  .tools .sp{flex:1}
+  .tools label{display:flex;gap:4px;align-items:center;font-size:11.5px;
+    padding:3px 8px;background:var(--field);border:.5px solid var(--border);
+    border-radius:13px;cursor:pointer}
+  .tools .note{font-size:11px;color:var(--muted)}
+
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:13px}
+  .block{background:var(--field);border:.5px solid var(--border);
+    border-radius:10px;margin-bottom:11px;overflow:hidden}
+  .block>h3{margin:0;padding:8px 11px;font-size:12px;font-weight:700;
+    display:flex;align-items:center;gap:8px;
+    border-bottom:.5px solid var(--hairline)}
+  .block>h3 .tag{margin-left:auto;font-weight:600;font-size:10.5px;
+    padding:1px 7px;border-radius:9px}
+  .block.answered>h3{color:var(--ok)}
+  .block.refused>h3{color:var(--warn)}
+  .block.gated>h3{color:var(--danger)}
+  .block .text{padding:10px 12px;font-size:13.5px;white-space:pre-wrap;
+    overflow-wrap:anywhere}
+  .checks{margin:0 12px 10px;display:flex;gap:6px;flex-wrap:wrap;font-size:11.5px}
+  .checks span{padding:2px 8px;border-radius:12px;background:var(--code-bg)}
+  .checks span.yes{background:rgba(52,199,89,.16);color:var(--ok);font-weight:600}
+  .checks span.no{background:var(--danger-bg);color:var(--danger);font-weight:600}
+
+  .srcbox{margin:0 12px 10px}
+  .srcbox .ttl{font-size:10px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.03em;font-weight:600;margin-bottom:4px}
+  .src{padding:6px 9px;margin-bottom:4px;background:var(--code-bg);
+    border-radius:7px;font-size:11.5px}
+  .src .p{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px;
+    overflow-wrap:anywhere}
+  .src .s{color:var(--muted);margin-top:1px}
+  .src .cid{color:var(--muted);font-size:10px;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+
+  /* Главное в этом дне: цитата внутри текста куска, подсвеченная. */
+  .quote{margin:0 12px 10px;border-radius:8px;overflow:hidden;
+    border:.5px solid var(--border)}
+  .quote.ok{border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .quote.bad{border-color:color-mix(in srgb,var(--danger) 50%,transparent)}
+  .quote .head{padding:5px 9px;font-size:11.5px;font-weight:600;
+    display:flex;gap:7px;align-items:baseline}
+  .quote.ok .head{background:rgba(52,199,89,.12);color:var(--ok)}
+  .quote.bad .head{background:var(--danger-bg);color:var(--danger)}
+  .quote .head .where{margin-left:auto;font-weight:400;font-size:10.5px;
+    color:var(--muted);font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:48%}
+  .quote .said{padding:6px 9px;font-size:12px;font-style:italic;
+    border-bottom:.5px dashed var(--hairline);overflow-wrap:anywhere}
+  .quote .inchunk{padding:7px 9px;font-size:11.5px;white-space:pre-wrap;
+    max-height:150px;overflow:auto;overflow-wrap:anywhere;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;line-height:1.45}
+  .quote .inchunk mark{background:var(--mark);color:inherit;
+    border-radius:3px;padding:0 1px}
+  .quote .hint{padding:4px 9px;font-size:10.5px;color:var(--muted)}
+
+  .meta{margin:0 12px 10px;font-size:10.5px;color:var(--muted);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+
+  table.cmp{width:100%;border-collapse:collapse;font-size:12px}
+  table.cmp th,table.cmp td{padding:5px 7px;text-align:left;
+    border-bottom:.5px solid var(--hairline)}
+  table.cmp th{font-size:10.5px;color:var(--muted);font-weight:600;
+    text-transform:uppercase;letter-spacing:.03em}
+  table.cmp td.mid{text-align:center}
+  table.cmp td.num{text-align:right;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .tick{font-weight:700}
+  .tick.yes{color:var(--ok)}
+  .tick.no{color:var(--danger)}
+  .summary{margin-top:11px;padding:10px 13px;background:var(--code-bg);
+    border-radius:9px;font-size:12.5px}
+  .summary table{width:100%;border-collapse:collapse}
+  .summary td{padding:3px 0}
+  .summary td+td{text-align:right;font-weight:700;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .summary td.bad+td{color:var(--danger)}
+  .summary .note{margin-top:7px;color:var(--muted);font-size:11.5px}
+  .grp{margin:9px 0 3px;font-size:11px;color:var(--muted);font-weight:600;
+    text-transform:uppercase;letter-spacing:.03em}
+  .empty{margin:auto;text-align:center;max-width:500px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .err{background:var(--danger-bg);color:var(--danger);padding:8px 11px;
+    border-radius:8px;font-size:12px;margin-bottom:9px}
+  .waiting{display:flex;gap:7px;align-items:center;font-size:12px;
+    color:var(--muted);padding:4px 0}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1160px){.aside{width:172px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b>Цитаты и источники</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="aside">
+      <header>Контрольные (ответ есть)</header>
+      <div class="qlist" id="qlist"></div>
+      <header>Не по теме</header>
+      <div class="qlist alien" id="alien"></div>
+      <header>Тема наша, ответа нет</header>
+      <div class="qlist nearby" id="nearby"></div>
+      <header>Недавние <button id="clearRecent">очистить</button></header>
+      <div class="qlist" id="recent"></div>
+    </nav>
+
+    <div class="main">
+      <div class="top">
+        <div class="row">
+          <input type="search" id="q" placeholder="Спросите про проект — или возьмите вопрос слева">
+          <button class="btn go" id="ask">Спросить</button>
+        </div>
+        <div class="tools">
+          <label><input type="checkbox" id="rerank" checked>реранкинг дня 23</label>
+          <label><input type="checkbox" id="gate" checked>порог отказа</label>
+          <span class="sp"></span>
+          <button class="btn" id="run">Прогнать 10 вопросов</button>
+          <button class="btn" id="probe">Проверить «не знаю»</button>
+        </div>
+        <div class="tools"><span class="note" id="note"></span></div>
+      </div>
+      <div class="pane" id="pane"></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>эмбеддинги <b id="emb">—</b></span>
+    <span>индекс <b id="idx">—</b></span>
+    <span>порог отказа <b id="thr">—</b></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">❝</div>
+    <h2>Цитата, проверенная дословно</h2>
+    <p>Модель обязана приводить фрагменты знак в знак. Каждый фрагмент
+       ищется в выданном куске и подсвечивается прямо в нём — видно, что
+       он действительно оттуда. А если ничего похожего не нашлось,
+       ассистент говорит «не знаю» и просит уточнить.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const pane=$('#pane');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+const num=n=>(n??0).toLocaleString('ru');
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;');
+
+function showEmpty(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function showError(text){
+  const d=document.createElement('div');d.className='err';d.textContent=text;
+  pane.prepend(d);
+}
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const d=await r.json();
+  if(d.error){showError(d.error);return null;}
+  return d;
+}
+function waiting(text){
+  const d=document.createElement('div');d.className='waiting';
+  d.innerHTML='<div class="dots"><i></i><i></i><i></i></div><span></span>';
+  d.querySelector('span').textContent=text;
+  return d;
+}
+
+/* ── боковые списки ────────────────────────────────────────────── */
+function fillList(id,items,numbered){
+  const box=$('#'+id);box.replaceChildren();
+  if(!items||!items.length){
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'пока ничего'}));
+    return;
+  }
+  items.forEach((item,i)=>{
+    const text=typeof item==='string'?item:item.q;
+    const d=document.createElement('div');
+    d.innerHTML=(numbered?'<b></b>':'')+'<span></span>';
+    if(numbered)d.querySelector('b').textContent=((item.n??i+1)+'.');
+    d.querySelector('span').textContent=text;
+    d.title=typeof item==='string'?text
+      :(text+'\n\nждём: '+item.expect.join('; ')
+        +'\nисточники: '+item.sources.join(', '));
+    d.onclick=()=>{$('#q').value=text;ask();};
+    box.append(d);
+  });
+}
+function apply(next){
+  if(!next)return;
+  state={...state,...next};
+  $('#emb').textContent=(state.embedding_model||'—').split('/').pop();
+  const idx=state.index||{};
+  $('#idx').textContent=num(idx.chunks)+' кусков';
+  $('#thr').textContent=state.threshold??'—';
+  $('#subtitle').textContent='цитаты проверяются дословно · порог '
+    +(state.threshold??'—');
+  fillList('qlist',state.questions,true);
+  fillList('alien',state.alien,false);
+  fillList('nearby',state.nearby,false);
+  fillList('recent',state.recent,false);
+}
+
+/* ── подсветка цитаты внутри куска ─────────────────────────────── */
+function highlight(text,spans){
+  if(!spans||!spans.length)return esc(text);
+  const parts=[];let position=0;
+  for(const[from,to]of spans.slice().sort((a,b)=>a[0]-b[0])){
+    if(from<position)continue;
+    parts.push(esc(text.slice(position,from)));
+    parts.push('<mark>'+esc(text.slice(from,to))+'</mark>');
+    position=to;
+  }
+  parts.push(esc(text.slice(position)));
+  return parts.join('');
+}
+
+function answerBlock(record){
+  const kind=record.abstained?'gated'
+    :(record.confident?'answered':'refused');
+  const box=document.createElement('div');
+  box.className='block '+kind;
+  const title={gated:'Отказ по порогу — до модели дело не дошло',
+    refused:'Модель отказалась — вопрос по теме, ответа в выдержках нет',
+    answered:'Ответ'}[kind];
+  box.innerHTML='<h3><span class="t"></span><span class="tag"></span></h3>'
+    +'<div class="text"></div>';
+  box.querySelector('.t').textContent=title;
+  const tag=box.querySelector('.tag');
+  tag.textContent='топ-1 '+(record.top_score??0).toFixed(3);
+  tag.style.background='var(--code-bg)';
+  tag.style.color='var(--muted)';
+  box.querySelector('.text').textContent=(record.answer||'(пусто)').trim();
+
+  if(record.parse_failed){
+    const w=document.createElement('div');w.className='checks';
+    w.innerHTML='<span class="no">JSON не разобрался — показан сырой ответ</span>';
+    box.append(w);
+  }
+
+  const checks=document.createElement('div');checks.className='checks';
+  const flag=(ok,text)=>`<span class="${ok?'yes':'no'}">${ok?'✓':'✗'} ${text}</span>`;
+  let html=flag(record.sources.length>0,'источники ('+record.sources.length+')')
+    +flag(record.quotes.length>0,'цитаты ('+record.quotes.length+')');
+  if(record.quotes.length)
+    html+=flag(record.fabricated_quotes===0,
+      record.fabricated_quotes===0?'все подтверждены'
+        :(record.fabricated_quotes+' выдумано'));
+  if(record.support!==undefined)
+    html+=flag(record.support,'цитаты содержат факт');
+  if(record.answer_ok!==undefined)
+    html+=flag(record.answer_ok,'ответ содержит факт');
+  if(record.abstained)
+    html+='<span>'+esc(record.abstain_reason)+'</span>';
+  checks.innerHTML=html;
+  box.append(checks);
+
+  if(record.sources.length){
+    const srcbox=document.createElement('div');srcbox.className='srcbox';
+    srcbox.innerHTML='<div class="ttl">источники</div>';
+    for(const s of record.sources){
+      const d=document.createElement('div');d.className='src';
+      d.innerHTML='<div class="p"></div><div class="s"></div><div class="cid"></div>';
+      d.querySelector('.p').textContent='['+s.n+'] '+s.source;
+      d.querySelector('.s').textContent='раздел: '+s.section
+        +'  ·  близость '+s.score.toFixed(3);
+      d.querySelector('.cid').textContent='chunk_id: '+s.chunk_id;
+      srcbox.append(d);
+    }
+    box.append(srcbox);
+  }
+
+  for(const q of record.quotes||[]){
+    const chunk=(record.chunks||[])[q.n-1];
+    const d=document.createElement('div');
+    d.className='quote '+(q.verified?'ok':'bad');
+    d.innerHTML='<div class="head"><span class="v"></span>'
+      +'<span class="where"></span></div>'
+      +'<div class="said"></div><div class="inchunk"></div>'
+      +'<div class="hint"></div>';
+    d.querySelector('.v').textContent=q.verified
+      ?('✓ подтверждена дословно')
+      :('✗ ВЫДУМКА — совпало '+Math.round((q.matched_ratio||0)*100)+'%');
+    d.querySelector('.where').textContent='['+q.n+'] '+(q.chunk_id||'');
+    d.querySelector('.said').textContent='«'+(q.text||'').trim()+'»';
+    const inchunk=d.querySelector('.inchunk');
+    if(chunk){
+      inchunk.innerHTML=highlight(chunk.text||'',q.spans||[]);
+      d.querySelector('.hint').textContent=q.verified
+        ?'подсвечено — то же место в выданном куске'
+        :'в куске такого фрагмента нет';
+    }else{
+      inchunk.remove();
+      d.querySelector('.hint').textContent='номер выдержки вне диапазона';
+    }
+    box.append(d);
+  }
+
+  const meta=document.createElement('div');meta.className='meta';
+  meta.textContent=record.total_tokens+' токенов · '+record.seconds+'с'
+    +(record.abstained?' (модель не вызывалась)':'');
+  box.append(meta);
+  return box;
+}
+
+async function ask(){
+  const question=$('#q').value.trim();
+  if(!question||busy){if(!question)$('#q').focus();return;}
+  busy=true;lock();
+  pane.replaceChildren();
+  const wait=waiting('ищу, проверяю цитаты…');pane.append(wait);
+  try{
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question,rerank:$('#rerank').checked,
+                           gate:$('#gate').checked})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.answer)pane.insertBefore(answerBlock(m.answer),wait);
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+async function runAll(){
+  if(busy)return;
+  busy=true;lock();
+  pane.replaceChildren();
+  const table=document.createElement('table');table.className='cmp';
+  table.innerHTML='<thead><tr><th>#</th><th>вопрос</th><th class="mid">ист.</th>'
+    +'<th class="mid">цитаты</th><th class="mid">подтв.</th>'
+    +'<th class="mid">опора</th><th class="mid">ответ</th>'
+    +'<th class="num">ток.</th></tr></thead><tbody></tbody>';
+  pane.append(table);
+  const body=table.querySelector('tbody');
+  const wait=waiting('10 вопросов, минута-две…');pane.append(wait);
+  const tick=ok=>`<span class="tick ${ok?'yes':'no'}">${ok?'✓':'✗'}</span>`;
+  try{
+    const res=await fetch('/check',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({rerank:$('#rerank').checked})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.row){
+          const r=m.row;
+          const tr=document.createElement('tr');
+          tr.innerHTML='<td class="num"></td><td class="qq"></td>'
+            +`<td class="mid">${tick(r.has_sources)}</td>`
+            +`<td class="mid">${tick(r.has_quotes)} ${r.verified}</td>`
+            +`<td class="mid">${tick(r.fabricated===0)}</td>`
+            +`<td class="mid">${tick(r.support)}</td>`
+            +`<td class="mid">${tick(r.answer_ok)}</td>`
+            +`<td class="num">${num(r.tokens)}</td>`;
+          tr.children[0].textContent=r.n;
+          tr.children[1].textContent=r.question;
+          tr.children[1].title='ждали: '+r.expect.join('; ')+'\n\n'
+            +r.sources.map(s=>s.chunk_id).join('\n');
+          body.append(tr);
+        }
+        if(m.summary){
+          wait.remove();
+          const t=m.summary,total=m.total;
+          const box=document.createElement('div');box.className='summary';
+          box.innerHTML='<table><tbody>'
+            +`<tr><td>источники есть</td><td>${t.sources}/${total}</td></tr>`
+            +`<tr><td>цитаты есть</td><td>${t.quotes}/${total}</td></tr>`
+            +`<tr><td>все цитаты подтверждены</td><td>${t.all_verified}/${total}</td></tr>`
+            +`<tr><td class="${t.fabricated?'bad':''}">выдуманных цитат</td>`
+            +`<td>${t.fabricated}</td></tr>`
+            +`<tr><td>цитаты содержат нужный факт</td><td>${t.support}/${total}</td></tr>`
+            +`<tr><td>ответ содержит нужный факт</td><td>${t.answer_ok}/${total}</td></tr>`
+            +`<tr><td>токенов</td><td>${num(t.tokens)}</td></tr>`
+            +'</tbody></table>'
+            +`<div class="note">${m.rerank?'с реранкингом дня 23':'без реранкинга'}</div>`;
+          pane.append(box);
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+async function probeAbstain(){
+  if(busy)return;
+  busy=true;lock();
+  pane.replaceChildren();
+  const table=document.createElement('table');table.className='cmp';
+  table.innerHTML='<thead><tr><th>группа</th><th>вопрос</th>'
+    +'<th class="num">топ-1</th><th>что сделал</th>'
+    +'<th class="mid">верно</th><th class="num">ток.</th>'
+    +'</tr></thead><tbody></tbody>';
+  pane.append(table);
+  const body=table.querySelector('tbody');
+  const wait=waiting('12 вопросов трёх видов…');pane.append(wait);
+  try{
+    const res=await fetch('/abstain',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:'{}'});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.probe){
+          const p=m.probe;
+          const tr=document.createElement('tr');
+          tr.innerHTML='<td class="g"></td><td class="q"></td>'
+            +'<td class="num s"></td><td class="k"></td>'
+            +`<td class="mid"><span class="tick ${p.right?'yes':'no'}">`
+            +`${p.right?'✓':'✗'}</span></td>`
+            +`<td class="num">${num(p.tokens)}</td>`;
+          tr.querySelector('.g').textContent=p.group;
+          tr.querySelector('.q').textContent=p.question;
+          tr.querySelector('.s').textContent=p.score.toFixed(3);
+          tr.querySelector('.k').textContent=p.kind;
+          body.append(tr);
+        }
+        if(m.probe_done){
+          wait.remove();
+          const box=document.createElement('div');box.className='summary';
+          box.innerHTML=`<div class="note">Порог ${m.threshold}. `
+            +`Отказов до обращения к модели: <b>${m.free_refusals}</b> — `
+            +`это нулевой расход токенов. Околотематические вопросы порог `
+            +`не ловит: там отказывает сама модель.</div>`;
+          pane.append(box);
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+function lock(){
+  for(const id of['ask','run','probe'])$('#'+id).disabled=busy;
+  for(const id of['rerank','gate'])$('#'+id).disabled=busy;
+}
+$('#ask').addEventListener('click',ask);
+$('#q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();ask();}});
+$('#run').addEventListener('click',runAll);
+$('#probe').addEventListener('click',probeAbstain);
+$('#clearRecent').addEventListener('click',async()=>{
+  const d=await post('/recent/clear');if(d)apply(d);});
+
+fetch('/state').then(r=>r.json()).then(d=>{
+  apply(d);
+  $('#note').textContent='цитата ищется в выданном куске дословно и '
+    +'подсвечивается в нём';
+  showEmpty();
+}).catch(()=>showEmpty());
+</script>
+</body>
+</html>
