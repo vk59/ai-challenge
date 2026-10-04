@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Индекс — поиск по документам проекта</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --field:#fff;--border:rgba(0,0,0,.12);--hairline:rgba(0,0,0,.08);
+    --accent:#007aff;--code-bg:rgba(0,0,0,.05);--danger:#d70015;
+    --danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--fixed:#ff9f0a;--structural:#5e5ce6;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --field:#2c2c2e;--border:rgba(255,255,255,.14);--hairline:rgba(255,255,255,.10);
+    --accent:#0a84ff;--code-bg:rgba(255,255,255,.07);--danger:#ff6961;
+    --danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--fixed:#ffb340;--structural:#7d7aff;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1320px);height:min(100%,830px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:24px;padding:0 11px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn.go{background:var(--accent);border-color:transparent;color:#fff}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  .body{flex:1;min-height:0;display:flex}
+  .aside{flex:none;width:186px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column;
+    overflow-y:auto}
+  .aside header{flex:none;display:flex;align-items:center;padding:9px 11px 6px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .aside header button{margin-left:auto;font:inherit;font-size:10.5px;
+    text-transform:none;letter-spacing:0;padding:1px 6px;background:var(--field);
+    border:.5px solid var(--border);border-radius:5px;color:var(--muted);
+    cursor:pointer}
+  .hist{padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
+  .hist div{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11.5px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    border:.5px solid transparent}
+  .hist div:hover{background:var(--field);border-color:var(--border)}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px 11px 8px}
+  .card{margin:0 9px 7px;padding:7px 9px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;font-size:11.5px}
+  .card .nm{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px;
+    font-weight:700}
+  .card.fixed .nm{color:var(--fixed)}
+  .card.structural .nm{color:var(--structural)}
+  .card .cap{color:var(--muted);font-size:10.5px;margin-top:1px}
+  .card table{width:100%;margin-top:4px;border-collapse:collapse;font-size:10.5px}
+  .card td{padding:1px 0;color:var(--muted)}
+  .card td+td{text-align:right;color:var(--text);
+    font-variant-numeric:tabular-nums}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{flex:none;padding:10px 14px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .row{display:flex;gap:7px;align-items:center}
+  .row input[type=search]{flex:1;font:inherit;font-size:13px;padding:7px 12px;
+    background:var(--field);border:.5px solid var(--border);border-radius:9px;
+    color:var(--text);outline:none;-webkit-appearance:none}
+  .row input[type=search]:focus{border-color:var(--accent)}
+  .row select{font:inherit;font-size:12px;padding:5px 7px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;color:var(--text)}
+  .tools{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center}
+  .tools .sp{flex:1}
+  .examples{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .examples button{font:inherit;font-size:11px;padding:3px 8px;color:var(--muted);
+    background:var(--field);border:.5px solid var(--border);border-radius:11px;
+    cursor:pointer}
+  .examples button:hover{color:var(--text);border-color:var(--accent)}
+
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:13px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .col>h3{margin:0 0 7px;font-size:11.5px;font-weight:700;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    display:flex;align-items:baseline;gap:6px}
+  .col.fixed>h3{color:var(--fixed)}
+  .col.structural>h3{color:var(--structural)}
+  .col>h3 span{font-family:-apple-system,sans-serif;font-weight:400;
+    font-size:10.5px;color:var(--muted)}
+  .hit{margin-bottom:8px;padding:8px 10px;background:var(--field);
+    border:.5px solid var(--border);border-radius:8px}
+  .hit .line1{display:flex;align-items:baseline;gap:6px}
+  .hit .pos{flex:none;width:16px;height:16px;border-radius:50%;display:grid;
+    place-items:center;font-size:9.5px;font-weight:700;color:#fff}
+  .col.fixed .hit .pos{background:var(--fixed)}
+  .col.structural .hit .pos{background:var(--structural)}
+  .hit .score{flex:none;font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    font-size:11px;font-variant-numeric:tabular-nums}
+  .hit .src{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:11.5px}
+  /* Раздел — то, из-за чего весь день: у fixed это цифры, у structural смысл. */
+  .hit .sec{margin-top:4px;padding:3px 7px;background:var(--code-bg);
+    border-radius:5px;font-size:11.5px;font-weight:600;overflow-wrap:anywhere}
+  .hit .meta{margin-top:3px;font-size:10px;color:var(--muted);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+  .hit .txt{margin-top:5px;font-size:11.5px;color:var(--muted);
+    max-height:62px;overflow:hidden;overflow-wrap:anywhere;
+    white-space:pre-wrap}
+  .hit.open .txt{max-height:none}
+  .hit .more{margin-top:3px;font-size:10.5px;color:var(--accent);cursor:pointer}
+
+  .log{font:11.5px/1.5 ui-monospace,"SF Mono",Menlo,monospace;
+    white-space:pre-wrap;color:var(--muted)}
+  .bar{height:5px;background:var(--code-bg);border-radius:3px;overflow:hidden;
+    margin:4px 0 9px}
+  .bar i{display:block;height:100%;background:var(--accent);width:0;
+    transition:width .18s}
+  table.cmp{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}
+  table.cmp th,table.cmp td{padding:4px 7px;text-align:left;
+    border-bottom:.5px solid var(--hairline)}
+  table.cmp th{font-size:10.5px;color:var(--muted);font-weight:600;
+    text-transform:uppercase;letter-spacing:.03em}
+  table.cmp td.num{text-align:right;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  table.cmp td.win{color:var(--ok);font-weight:700}
+  table.cmp tr.q td{font-size:11.5px}
+  .place{display:inline-grid;place-items:center;width:17px;height:17px;
+    border-radius:50%;font-size:10px;font-weight:700;color:#fff}
+  .place.p1{background:var(--ok)}
+  .place.p2,.place.p3{background:var(--accent)}
+  .place.no{background:var(--danger)}
+  .place.far{background:var(--muted)}
+  .verdict{margin-top:9px;padding:8px 11px;background:var(--code-bg);
+    border-radius:8px;font-size:12.5px}
+  .verdict b{font-size:13px}
+  .empty{margin:auto;text-align:center;max-width:480px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .err{background:var(--danger-bg);color:var(--danger);padding:8px 11px;
+    border-radius:8px;font-size:12px}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1150px){.cols{grid-template-columns:1fr}.aside{width:160px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b>Индекс документов</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="aside">
+      <header>Стратегии</header>
+      <div id="cards"></div>
+      <header>Запросы <button id="clearHist">очистить</button></header>
+      <div class="hist" id="hist"></div>
+    </nav>
+
+    <div class="main">
+      <div class="top">
+        <div class="row">
+          <input type="search" id="q" placeholder="Спросите своими словами: почему сжатие бывает дороже…">
+          <select id="k">
+            <option value="3">топ-3</option>
+            <option value="5" selected>топ-5</option>
+            <option value="8">топ-8</option>
+          </select>
+          <button class="btn go" id="find">Найти</button>
+        </div>
+        <div class="tools">
+          <button class="btn" id="build">Собрать индекс</button>
+          <button class="btn" id="cmp">Сравнить стратегии</button>
+          <span class="sp"></span>
+          <span id="corpus" style="font-size:11px;color:var(--muted)"></span>
+        </div>
+        <div class="examples" id="examples"></div>
+      </div>
+      <div class="pane" id="pane"></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>модель <b id="model">—</b></span>
+    <span>размерность <b id="dim">—</b></span>
+    <span>в кэше <b id="cached">0</b></span>
+    <span>потрачено <b id="spent">—</b></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">🗂</div>
+    <h2>Две стратегии нарезки бок о бок</h2>
+    <p>Один запрос — две выдачи. Слева куски нарезаны окном по 1200 знаков,
+       справа — по заголовкам и определениям. Смотрите на строку «раздел»:
+       у первой это номера знаков, у второй — название раздела.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const pane=$('#pane');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+const ПРИМЕРЫ=[
+  'почему сжатие бывает дороже, чем экономит',
+  'приложение из Finder не видит репозиторий',
+  'задача пропустила запуск, что будет дальше',
+  'зачем шаги обмениваются ссылками, а не текстом',
+  'чем долгая память отличается от рабочей',
+];
+
+const эк=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;');
+const число=n=>(n??0).toLocaleString('ru');
+
+function пусто(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function ошибка(текст){
+  const d=document.createElement('div');d.className='err';d.textContent=текст;
+  pane.replaceChildren(d);
+}
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const d=await r.json();
+  if(d.error){ошибка(d.error);return null;}
+  return d;
+}
+
+/* ── боковые карточки стратегий ─────────────────────────────────── */
+function карточки(){
+  const box=$('#cards');box.replaceChildren();
+  for(const с of state.strategies||[]){
+    const d=document.createElement('div');
+    d.className='card '+с.name;
+    const т=с.stats||{};
+    d.innerHTML='<div class="nm"></div><div class="cap"></div>'
+      +'<table><tbody>'
+      +'<tr><td>кусков</td><td class="c1"></td></tr>'
+      +'<tr><td>средняя</td><td class="c2"></td></tr>'
+      +'<tr><td>медиана</td><td class="c3"></td></tr>'
+      +'<tr><td>от…до</td><td class="c4"></td></tr>'
+      +'<tr><td>разброс</td><td class="c5"></td></tr>'
+      +'</tbody></table>';
+    d.querySelector('.nm').textContent=с.name;
+    d.querySelector('.cap').textContent=с.caption;
+    d.querySelector('.c1').textContent=число(т.chunks);
+    d.querySelector('.c2').textContent=число(т.avg);
+    d.querySelector('.c3').textContent=число(т.median);
+    d.querySelector('.c4').textContent=(т.min||0)+'–'+(т.max||0);
+    d.querySelector('.c5').textContent='±'+число(т.spread);
+    box.append(d);
+  }
+}
+function история(){
+  const box=$('#hist');box.replaceChildren();
+  const список=state.history||[];
+  if(!список.length){
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'запросов пока не было'}));
+    return;
+  }
+  for(const з of список){
+    const d=document.createElement('div');
+    d.textContent=з;d.title=з;
+    d.onclick=()=>{$('#q').value=з;найти();};
+    box.append(d);
+  }
+}
+function примеры(){
+  const box=$('#examples');box.replaceChildren();
+  for(const п of ПРИМЕРЫ){
+    const b=document.createElement('button');
+    b.textContent=п;b.disabled=busy;
+    b.onclick=()=>{$('#q').value=п;найти();};
+    box.append(b);
+  }
+}
+function применить(d){
+  if(!d)return;
+  state={...state,...d};
+  $('#model').textContent=state.model||'—';
+  $('#dim').textContent=число(state.dim);
+  $('#cached').textContent=число(state.cached);
+  const р=state.spent||{};
+  $('#spent').textContent=р.money_pretty||'$0';
+  const всего=(state.strategies||[])
+    .reduce((s,с)=>s+((с.stats||{}).chunks||0),0);
+  $('#subtitle').textContent=всего?(число(всего)+' кусков в индексе'):'индекс пуст';
+  карточки();история();примеры();
+}
+
+/* ── выдача в две колонки ──────────────────────────────────────── */
+function найдено(запрос,результаты){
+  pane.replaceChildren();
+  const cols=document.createElement('div');cols.className='cols';
+  for(const с of state.strategies||[]){
+    const список=результаты[с.name]||[];
+    const col=document.createElement('div');col.className='col '+с.name;
+    const h=document.createElement('h3');
+    h.innerHTML='<span class="t"></span><span class="c"></span>';
+    h.querySelector('.t').textContent=с.name;
+    h.querySelector('.c').textContent=с.caption;
+    col.append(h);
+    if(!список.length)
+      col.append(Object.assign(document.createElement('div'),
+        {className:'nothing',textContent:'ничего не нашлось'}));
+    for(const[позиция,х]of список.entries()){
+      const d=document.createElement('div');d.className='hit';
+      d.innerHTML='<div class="line1"><span class="pos"></span>'
+        +'<span class="score"></span><span class="src"></span></div>'
+        +'<div class="sec"></div><div class="meta"></div>'
+        +'<div class="txt"></div><div class="more">показать целиком</div>';
+      d.querySelector('.pos').textContent=позиция+1;
+      d.querySelector('.score').textContent=(х.score??0).toFixed(3);
+      d.querySelector('.src').textContent=х.source;
+      d.querySelector('.src').title=х.source;
+      d.querySelector('.sec').textContent='раздел: '+х.section;
+      d.querySelector('.meta').textContent=x_meta(х);
+      d.querySelector('.txt').textContent=(х.text||'').trim();
+      const ещё=d.querySelector('.more');
+      ещё.onclick=()=>{d.classList.toggle('open');
+        ещё.textContent=d.classList.contains('open')?'свернуть':'показать целиком';};
+      col.append(d);
+    }
+    cols.append(col);
+  }
+  pane.append(cols);
+}
+const x_meta=х=>`${х.chunk_id}  ·  ${х.length} знаков  ·  со смещения ${х.start}`;
+
+/* ── сборка ────────────────────────────────────────────────────── */
+async function собрать(){
+  if(busy)return;
+  busy=true;блокировка();
+  pane.replaceChildren();
+  const лог=document.createElement('div');лог.className='log';pane.append(лог);
+  const полоса=document.createElement('div');полоса.className='bar';
+  полоса.innerHTML='<i></i>';pane.append(полоса);
+  const пишем=т=>{лог.textContent+=т+'\n';};
+  try{
+    const res=await fetch('/build',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:'{}'});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){пишем('✗ '+m.error);break;}
+        if(m.corpus)пишем(`корпус: ${m.corpus.documents} документов, `
+          +`${число(m.corpus.chars)} знаков, ≈${m.corpus.pages} страниц`);
+        if(m.stage&&m.stage.state==='идёт')пишем(`\n${m.stage.strategy}: нарезаю и считаю векторы…`);
+        if(m.progress){
+          const{done:сделано,total:всего}=m.progress;
+          полоса.firstElementChild.style.width=(100*сделано/всего)+'%';
+        }
+        if(m.stage&&m.stage.state==='готово'){
+          const т=m.stage.stats;
+          пишем(`  кусков ${т.chunks}, средняя ${т.avg}, медиана ${т.median}, `
+            +`от ${т.min} до ${т.max}, разброс ±${т.spread}`);
+          полоса.firstElementChild.style.width='100%';
+        }
+        if(m.done){применить(m);
+          пишем(`\nготово · потрачено ${(m.spent||{}).money_pretty||'$0'}`
+            +` · в кэше ${число(m.cached)} векторов`);}
+      }
+    }
+  }catch(e){пишем('✗ '+(e.message||e));}
+  finally{busy=false;блокировка();}
+}
+
+/* ── сравнение ─────────────────────────────────────────────────── */
+async function сравнить(){
+  if(busy)return;
+  busy=true;блокировка();
+  pane.replaceChildren();
+  const t=document.createElement('table');t.className='cmp';
+  t.innerHTML='<thead><tr><th>#</th><th>вопрос</th>'
+    +'<th style="text-align:center">fixed</th>'
+    +'<th style="text-align:center">structural</th></tr></thead><tbody></tbody>';
+  pane.append(t);
+  const тело=t.querySelector('tbody');
+  const метка=м=>{
+    const s=document.createElement('span');
+    s.className='place '+(м===1?'p1':м===2||м===3?'p'+м:м?'far':'no');
+    s.textContent=м?м:'—';return s;};
+  try{
+    const res=await fetch('/compare',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:'{}'});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){ошибка(m.error);break;}
+        if(m.row){
+          const tr=document.createElement('tr');tr.className='q';
+          tr.innerHTML='<td class="num"></td><td class="qq"></td>'
+            +'<td style="text-align:center" class="a"></td>'
+            +'<td style="text-align:center" class="b"></td>';
+          tr.querySelector('.num').textContent=m.row.n;
+          tr.querySelector('.qq').textContent=m.row.question;
+          tr.querySelector('.qq').title='ждали: '+m.row.expect.join(', ');
+          tr.querySelector('.a').append(метка(m.row.places.fixed.place));
+          tr.querySelector('.b').append(метка(m.row.places.structural.place));
+          тело.append(tr);
+        }
+        if(m.summary){
+          const f=m.summary.fixed,s=m.summary.structural;
+          const итог=document.createElement('table');итог.className='cmp';
+          итог.innerHTML='<thead><tr><th>стратегия</th><th>hit@1</th>'
+            +'<th>hit@3</th><th>MRR</th></tr></thead><tbody>'
+            +`<tr><td>fixed</td><td class="num">${f.hit1}/${f.questions}</td>`
+            +`<td class="num">${f.hit3}/${f.questions}</td>`
+            +`<td class="num ${f.mrr>=s.mrr?'win':''}">${f.mrr.toFixed(3)}</td></tr>`
+            +`<tr><td>structural</td><td class="num">${s.hit1}/${s.questions}</td>`
+            +`<td class="num">${s.hit3}/${s.questions}</td>`
+            +`<td class="num ${s.mrr>=f.mrr?'win':''}">${s.mrr.toFixed(3)}</td></tr>`
+            +'</tbody>';
+          pane.append(итог);
+          const д=(s.mrr-f.mrr);
+          const кто=д>0.02?'structural':д<-0.02?'fixed':'ничья';
+          const в=document.createElement('div');в.className='verdict';
+          в.innerHTML=`Разница MRR <b>${д>=0?'+':''}${д.toFixed(3)}</b> → ${кто}.`
+            +' Цифра в кружке — место нужного источника в выдаче,'
+            +' «—» значит не попал в топ-5.';
+          pane.append(в);
+        }
+        if(m.done)применить(m);
+      }
+    }
+  }catch(e){ошибка(String(e.message||e));}
+  finally{busy=false;блокировка();}
+}
+
+async function найти(){
+  const запрос=$('#q').value.trim();
+  if(!запрос||busy){if(!запрос)$('#q').focus();return;}
+  busy=true;блокировка();
+  try{
+    const d=await post('/search',{query:запрос,k:+$('#k').value});
+    if(d){применить(d);найдено(запрос,d.results||{});}
+  }finally{busy=false;блокировка();}
+}
+
+function блокировка(){
+  for(const id of['find','build','cmp'])$('#'+id).disabled=busy;
+  примеры();
+}
+$('#find').addEventListener('click',найти);
+$('#q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();найти();}});
+$('#build').addEventListener('click',собрать);
+$('#cmp').addEventListener('click',сравнить);
+$('#clearHist').addEventListener('click',async()=>{
+  const d=await post('/history/clear');if(d)применить(d);});
+
+fetch('/state').then(r=>r.json()).then(d=>{
+  применить(d);
+  $('#corpus').textContent=`вопросов для сравнения: ${d.questions} · `
+    +`страница = ${d.page_chars} знаков`;
+  пусто();
+}).catch(()=>пусто());
+</script>
+</body>
+</html>
