@@ -56,6 +56,21 @@ TASKS = TaskStore()
 CHATS: dict[str, ChatSession] = {}
 
 
+def pick_model(payload: dict) -> tuple[bool, str | None]:
+    """Куда идём и с какой моделью.
+
+    Имя локальной модели в облако посылать нельзя: DeepSeek отвечает
+    «HTTP 400: supported API model names are deepseek-flash… but you passed
+    qwen2.5:3b». Окно присылает выбранную слева модель всегда, поэтому
+    отсекаем здесь, на сервере, а не надеемся на клиент.
+    """
+    cloud = bool(payload.get("cloud"))
+    if cloud:
+        return True, None
+    model = str(payload.get("model") or "").strip()
+    return False, model or None
+
+
 def chat_session(model: str | None, cloud: bool) -> ChatSession:
     key = "cloud" if cloud else (model or DEFAULT_LOCAL_MODEL)
     name = f"локально-{key}" if not cloud else "облако"
@@ -152,8 +167,7 @@ class Handler(BaseHTTPRequestHandler):
             self._chat(payload)
             return
         if route == "/chat/clear":
-            model = str(payload.get("model") or "") or None
-            cloud = bool(payload.get("cloud"))
+            cloud, model = pick_model(payload)
             session = chat_session(model, cloud)
             STORE.clear(session.session)
             TASKS.drop(session.session)
@@ -165,8 +179,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── шесть запросов ──────────────────────────────────────────────────
     def _probe(self, payload: dict) -> None:
-        cloud = bool(payload.get("cloud"))
-        model = str(payload.get("model") or "") or None
+        cloud, model = pick_model(payload)
         cold = bool(payload.get("cold"))
         self._start_stream()
 
@@ -212,8 +225,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── RAG против чистой модели ────────────────────────────────────────
     def _rag(self, payload: dict) -> None:
-        cloud = bool(payload.get("cloud"))
-        model = str(payload.get("model") or "") or None
+        cloud, model = pick_model(payload)
         self._start_stream()
 
         events: queue.Queue = queue.Queue()
@@ -262,8 +274,7 @@ class Handler(BaseHTTPRequestHandler):
     # ── свободный вопрос ────────────────────────────────────────────────
     def _ask(self, payload: dict) -> None:
         question = str(payload.get("question") or "").strip()
-        cloud = bool(payload.get("cloud"))
-        model = str(payload.get("model") or "") or None
+        cloud, model = pick_model(payload)
         self._start_stream()
         if not question:
             self._line({"error": "Пустой вопрос"})
@@ -298,8 +309,7 @@ class Handler(BaseHTTPRequestHandler):
     # ── чат на локальной модели ─────────────────────────────────────────
     def _chat(self, payload: dict) -> None:
         message = str(payload.get("message") or "").strip()
-        cloud = bool(payload.get("cloud"))
-        model = str(payload.get("model") or "") or None
+        cloud, model = pick_model(payload)
         self._start_stream()
         if not message:
             self._line({"error": "Пустая реплика"})
