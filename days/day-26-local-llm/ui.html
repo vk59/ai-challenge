@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Локальная модель — запущена и отвечает</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --field:#fff;--border:rgba(0,0,0,.12);--hairline:rgba(0,0,0,.08);
+    --accent:#007aff;--code-bg:rgba(0,0,0,.05);--danger:#d70015;
+    --danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--warn:#ff9f0a;--local:#34c759;--cloud:#5e5ce6;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --field:#2c2c2e;--border:rgba(255,255,255,.14);--hairline:rgba(255,255,255,.10);
+    --accent:#0a84ff;--code-bg:rgba(255,255,255,.07);--danger:#ff6961;
+    --danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--warn:#ffb340;--local:#30d158;--cloud:#7d7aff;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1320px);height:min(100%,840px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:25px;padding:0 11px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn.go{background:var(--accent);border-color:transparent;color:#fff}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  .body{flex:1;min-height:0;display:flex}
+  .aside{flex:none;width:224px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column;
+    overflow-y:auto}
+  .aside header{flex:none;padding:9px 11px 6px;font-size:11px;color:var(--muted);
+    font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .status{margin:0 10px 9px;padding:8px 10px;border-radius:8px;font-size:11.5px;
+    border:.5px solid}
+  .status.up{background:rgba(52,199,89,.12);
+    border-color:color-mix(in srgb,var(--ok) 42%,transparent)}
+  .status.down{background:var(--danger-bg);
+    border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
+  .status .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+    margin-right:5px}
+  .status.up .dot{background:var(--ok)}
+  .status.down .dot{background:var(--danger)}
+  .status b{font-weight:700}
+  .status .why{margin-top:3px;color:var(--muted);font-size:10.5px}
+  .mdl{margin:0 10px 4px;padding:6px 9px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;font-size:11.5px;
+    cursor:pointer}
+  .mdl:hover{border-color:var(--accent)}
+  .mdl.picked{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+  .mdl .n{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-weight:650}
+  .mdl .d{color:var(--muted);font-size:10.5px;margin-top:1px}
+  .mdl .live{color:var(--ok);font-size:10px;font-weight:700}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px 11px 8px}
+  .plist{padding:0 10px 9px;font-size:11px}
+  .plist div{padding:2px 0;color:var(--muted);display:flex;gap:5px}
+  .plist div b{flex:none;color:var(--text);font-variant-numeric:tabular-nums}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{flex:none;padding:10px 14px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .row{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+  .row input[type=search]{flex:1;min-width:220px;font:inherit;font-size:13px;
+    padding:7px 12px;background:var(--field);border:.5px solid var(--border);
+    border-radius:9px;color:var(--text);outline:none;-webkit-appearance:none}
+  .row input[type=search]:focus{border-color:var(--accent)}
+  .tools{display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap}
+  .tools label{display:flex;gap:4px;align-items:center;font-size:11.5px;
+    padding:3px 8px;background:var(--field);border:.5px solid var(--border);
+    border-radius:13px;cursor:pointer}
+  .tools .sp{flex:1}
+  .tools .note{font-size:11px;color:var(--muted)}
+
+  .tabs{display:flex;gap:6px;margin-top:8px}
+  .tabs button{font:inherit;font-size:12px;padding:4px 12px;color:var(--muted);
+    background:transparent;border:.5px solid transparent;border-radius:7px;
+    cursor:pointer}
+  .tabs button.on{color:var(--text);background:var(--field);
+    border-color:var(--border);font-weight:600}
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:13px}
+  .pane.chat{display:flex;flex-direction:column;gap:9px}
+
+  /* Чат — тот же, что в дне 25, только на локальной модели. */
+  .msg{display:flex;flex-direction:column}
+  .msg.me{align-items:flex-end}.msg.bot{align-items:flex-start}
+  .bubble{max-width:88%;padding:8px 13px;border-radius:17px;
+    overflow-wrap:anywhere;white-space:pre-wrap}
+  .me .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:5px}
+  .bot .bubble{background:var(--code-bg);border-bottom-left-radius:5px}
+  .bot .bubble.refused{background:rgba(255,159,10,.16)}
+  .bot .bubble.err{background:var(--danger-bg);color:var(--danger)}
+  .qline{max-width:88%;font-size:11px;color:var(--muted);padding:2px 10px;
+    background:var(--code-bg);border-radius:9px;overflow-wrap:anywhere}
+  .qline b{color:var(--text);font-weight:600}
+  .srcline{max-width:88%;font-size:10.5px;color:var(--muted);padding:3px 10px;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+  .srcline .bad{color:var(--danger)}
+  .goalline{max-width:88%;font-size:11px;padding:4px 9px;border-radius:7px;
+    background:color-mix(in srgb,var(--cloud) 14%,transparent)}
+  .goalline b{color:var(--cloud)}
+  .composer{flex:none;display:flex;align-items:flex-end;gap:8px;
+    padding:9px 12px;background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .composer textarea{flex:1;resize:none;max-height:90px;padding:7px 12px;
+    font:inherit;color:var(--text);background:var(--field);
+    border:.5px solid var(--border);border-radius:16px;outline:none}
+  .composer .send{flex:none;width:30px;height:30px;display:grid;
+    place-items:center;font-size:15px;color:#fff;background:var(--accent);
+    border:0;border-radius:50%;cursor:pointer}
+  .composer .send:disabled{background:var(--code-bg);color:var(--muted);
+    cursor:default}
+  table.t{width:100%;border-collapse:collapse;font-size:12px}
+  table.t th,table.t td{padding:5px 7px;text-align:left;
+    border-bottom:.5px solid var(--hairline);vertical-align:top}
+  table.t th{font-size:10.5px;color:var(--muted);font-weight:600;
+    text-transform:uppercase;letter-spacing:.03em}
+  table.t td.mid{text-align:center}
+  table.t td.num{text-align:right;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .tick{font-weight:700}.tick.yes{color:var(--ok)}.tick.no{color:var(--danger)}
+  .lvl{font-size:10px;padding:1px 6px;border-radius:8px;background:var(--code-bg);
+    color:var(--muted)}
+  .said{color:var(--muted);font-size:11px;margin-top:2px;overflow-wrap:anywhere}
+  .sum{margin-top:11px;padding:10px 13px;background:var(--code-bg);
+    border-radius:9px;font-size:12.5px}
+  .sum table{width:100%;border-collapse:collapse}
+  .sum td{padding:3px 0}
+  .sum td+td{text-align:right;font-weight:700;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .sum .note{margin-top:7px;color:var(--muted);font-size:11.5px;line-height:1.45}
+  .pair{background:var(--field);border:.5px solid var(--border);
+    border-radius:10px;margin-bottom:11px;overflow:hidden}
+  .pair>h4{margin:0;padding:8px 11px;font-size:12.5px;font-weight:600;
+    border-bottom:.5px solid var(--hairline)}
+  .pair>h4 span{color:var(--muted);font-size:11px;font-weight:400}
+  .half{padding:9px 12px;font-size:12.5px;overflow-wrap:anywhere}
+  .half+.half{border-top:.5px solid var(--hairline)}
+  .half .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;
+    font-weight:700;margin-bottom:3px}
+  .half.bare .lbl{color:var(--warn)}
+  .half.rag .lbl{color:var(--ok)}
+  .half .src{margin-top:5px;font-size:10.5px;color:var(--muted);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+  .half .qt{margin-top:4px;font-size:11px;font-style:italic;color:var(--muted)}
+  .half .qt.bad{color:var(--danger);font-style:normal}
+  .answer{background:var(--field);border:.5px solid var(--border);
+    border-radius:10px;padding:10px 12px;margin-bottom:11px}
+  .answer .meta{margin-top:6px;font-size:10.5px;color:var(--muted);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .empty{margin:auto;text-align:center;max-width:490px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .err{background:var(--danger-bg);color:var(--danger);padding:8px 11px;
+    border-radius:8px;font-size:12px;margin-bottom:9px}
+  .waiting{display:flex;gap:7px;align-items:center;font-size:12px;
+    color:var(--muted);padding:4px 0}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1150px){.aside{width:190px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b>Локальная модель</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="aside">
+      <header>Ollama</header>
+      <div id="status"></div>
+      <header>Модели</header>
+      <div id="models"></div>
+      <header>Запросы</header>
+      <div class="plist" id="plist"></div>
+    </nav>
+
+    <div class="main">
+      <div class="top">
+        <div class="row">
+          <input type="search" id="q" placeholder="Спросите что угодно — ответит модель на этой машине">
+          <button class="btn go" id="ask">Спросить</button>
+        </div>
+        <div class="tools">
+          <label><input type="checkbox" id="cloud">в облаке, для сравнения</label>
+          <label><input type="checkbox" id="cold" checked>мерить холодный старт</label>
+          <span class="sp"></span>
+          <button class="btn" id="probe">6 запросов разной сложности</button>
+          <button class="btn" id="rag">Дать свои документы</button>
+        </div>
+        <div class="tools"><span class="note" id="note"></span></div>
+        <div class="tabs">
+          <button id="tabChat" class="on">Чат</button>
+          <button id="tabBench">Стенд с замерами</button>
+        </div>
+      </div>
+      <div class="pane chat" id="chatPane"></div>
+      <footer class="composer" id="composer">
+        <textarea id="msg" rows="1" placeholder="Спросите про проект — отвечает модель на этой машине…"></textarea>
+        <button class="send" id="sendMsg" disabled title="Отправить (Enter)">↑</button>
+      </footer>
+      <div class="pane" id="pane" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>эндпоинт <b id="ep">—</b></span>
+    <span>модель <b id="mdl">—</b></span>
+    <span>индекс <b id="idx">—</b></span>
+  </div>
+</div>
+
+<template id="chatEmptyTpl">
+  <div class="empty">
+    <div class="glyph">🔌</div>
+    <h2>Тот же чат, но без сети</h2>
+    <p>История, раскрытие уточнений, поиск по документам, источники
+       и память задачи — всё то же, что в дне 25, только модель работает
+       на этой машине. Спросите что-нибудь, потом уточните «а почему?».</p>
+  </div>
+</template>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">🖥</div>
+    <h2>Модель работает на этой машине</h2>
+    <p>Без сети, без ключей, без оплаты за токены. Нажмите «6 запросов» —
+       увидите, где трёхмиллиардная модель справляется, а где начинает
+       выдумывать. А потом «Дать свои документы»: незнание лечится
+       поиском, а не только размером.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const pane=$('#pane');
+let busy=false,state={},picked=null;
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;');
+const num=n=>(n??0).toLocaleString('ru');
+
+function showEmpty(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function showError(text){
+  const d=document.createElement('div');d.className='err';d.textContent=text;
+  pane.prepend(d);
+}
+function waiting(text){
+  const d=document.createElement('div');d.className='waiting';
+  d.innerHTML='<div class="dots"><i></i><i></i><i></i></div><span></span>';
+  d.querySelector('span').textContent=text;return d;
+}
+
+/* ── боковое ───────────────────────────────────────────────────── */
+function renderStatus(){
+  const o=state.ollama||{};
+  const box=$('#status');
+  box.className='status '+(o.running?'up':'down');
+  box.innerHTML='<div><span class="dot"></span><b></b></div><div class="why"></div>';
+  box.querySelector('b').textContent=o.running
+    ?('запущен · '+(o.version||'')):'не отвечает';
+  box.querySelector('.why').textContent=o.running
+    ?((o.loaded||[]).length?('в памяти: '+o.loaded.join(', '))
+                           :'в памяти ничего — первый запрос будет холодным')
+    :'запустите: ollama serve';
+}
+function renderModels(){
+  const box=$('#models');box.replaceChildren();
+  const list=(state.ollama||{}).models||[];
+  if(!list.length){
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'моделей нет — ollama pull qwen2.5:3b'}));
+    return;
+  }
+  if(!picked)picked=state.default_model||list[0].name;
+  for(const m of list){
+    const loaded=((state.ollama||{}).loaded||[]).includes(m.name);
+    const d=document.createElement('div');
+    d.className='mdl'+(m.name===picked?' picked':'');
+    d.innerHTML='<div class="n"></div><div class="d"></div>';
+    d.querySelector('.n').textContent=m.name;
+    d.querySelector('.d').textContent=[m.size_gb+' ГБ',m.params,m.quant]
+      .filter(Boolean).join(' · ');
+    if(loaded){
+      const live=document.createElement('span');live.className='live';
+      live.textContent=' ● в памяти';
+      d.querySelector('.n').append(live);
+    }
+    d.onclick=()=>{if(busy)return;picked=m.name;renderModels();updateBar();
+      loadChat();};
+    box.append(d);
+  }
+}
+function renderProbes(){
+  const box=$('#plist');box.replaceChildren();
+  for(const p of state.probes||[]){
+    const d=document.createElement('div');
+    d.innerHTML='<b></b><span></span>';
+    d.querySelector('b').textContent=p.n+'.';
+    d.querySelector('span').textContent=p.name+' ('+p.level+')';
+    d.title=p.prompt;
+    box.append(d);
+  }
+}
+function updateBar(){
+  $('#ep').textContent=state.endpoint||'—';
+  $('#mdl').textContent=$('#cloud').checked?'облако':(picked||'—');
+  const idx=state.index||{};
+  $('#idx').textContent=num(idx.chunks)+' кусков';
+  const o=state.ollama||{};
+  $('#subtitle').textContent=o.running
+    ?((o.models||[]).length+' модели локально'):'Ollama не запущен';
+}
+function apply(next){
+  if(!next)return;
+  state={...state,...next};
+  renderStatus();renderModels();renderProbes();updateBar();
+}
+
+/* ── шесть запросов ────────────────────────────────────────────── */
+async function runProbe(){
+  if(busy)return;
+  busy=true;lock();
+  pane.replaceChildren();
+  const table=document.createElement('table');table.className='t';
+  table.innerHTML='<thead><tr><th>#</th><th>запрос</th><th class="mid">итог</th>'
+    +'<th class="num">сек</th><th class="num">ток.</th><th class="num">ток/с</th>'
+    +'</tr></thead><tbody></tbody>';
+  pane.append(table);
+  const body=table.querySelector('tbody');
+  const wait=waiting('гоняю шесть запросов…');pane.append(wait);
+  try{
+    const res=await fetch('/probe',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cloud:$('#cloud').checked,model:picked,
+                           cold:$('#cold').checked})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.cold!==undefined&&m.cold!==null)
+          wait.querySelector('span').textContent=
+            'холодный старт '+m.cold.toFixed(2)+'с, продолжаю…';
+        if(m.probe){
+          const p=m.probe;
+          const tr=document.createElement('tr');
+          tr.innerHTML='<td class="num"></td><td class="q"></td>'
+            +`<td class="mid"><span class="tick ${p.ok?'yes':'no'}">`
+            +`${p.ok?'✓':'✗'}</span></td>`
+            +`<td class="num">${p.seconds}</td><td class="num">${p.tokens}</td>`
+            +`<td class="num">${p.rate}</td>`;
+          tr.children[0].textContent=p.n;
+          const cell=tr.children[1];
+          cell.innerHTML='<div><b></b> <span class="lvl"></span></div>'
+            +'<div class="said"></div>';
+          cell.querySelector('b').textContent=p.name;
+          cell.querySelector('.lvl').textContent=p.level;
+          cell.querySelector('.said').textContent=p.answer.slice(0,190);
+          cell.title=p.prompt;
+          body.append(tr);
+          pane.scrollTop=pane.scrollHeight;
+        }
+        if(m.probe_done){
+          wait.remove();
+          const d=m.probe_done;
+          const box=document.createElement('div');box.className='sum';
+          let html='<table><tbody>'
+            +`<tr><td>пройдено</td><td>${d.passed}/${d.total}</td></tr>`
+            +`<tr><td>где</td><td>${d.cloud?'облако':d.model}</td></tr>`;
+          if(d.cold!==null&&d.cold!==undefined)
+            html+=`<tr><td>холодный старт</td><td>${d.cold.toFixed(2)}с</td></tr>`;
+          html+='</tbody></table>';
+          box.innerHTML=html;
+          if(!d.cloud){
+            const note=document.createElement('div');note.className='note';
+            note.textContent='Поставьте галочку «в облаке» и нажмите ещё раз — '
+              +'сравните, что проходит там, а что здесь.';
+            box.append(note);
+          }
+          pane.append(box);
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+/* ── свои документы ────────────────────────────────────────────── */
+async function runRag(){
+  if(busy)return;
+  busy=true;lock();
+  pane.replaceChildren();
+  const wait=waiting('три вопроса в двух режимах…');pane.append(wait);
+  try{
+    const res=await fetch('/rag',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({cloud:$('#cloud').checked,model:picked})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.rag){
+          const r=m.rag;
+          const box=document.createElement('div');box.className='pair';
+          box.innerHTML='<h4></h4>';
+          box.querySelector('h4').innerHTML=esc(r.question)
+            +' <span>ждём: '+esc(r.wanted.join(' / '))+'</span>';
+          for(const[cls,label,text,ok]of[
+              ['bare','без документов',r.plain,r.plain_ok],
+              ['rag','с документами',r.rag,r.rag_ok]]){
+            const half=document.createElement('div');
+            half.className='half '+cls;
+            half.innerHTML='<div class="lbl"></div><div class="tx"></div>';
+            half.querySelector('.lbl').innerHTML=label
+              +` <span class="tick ${ok?'yes':'no'}">${ok?'✓':'✗'}</span>`;
+            half.querySelector('.tx').textContent=text||'(пусто)';
+            if(cls==='rag'){
+              for(const s of r.sources||[]){
+                const d=document.createElement('div');d.className='src';
+                d.textContent='['+s.n+'] '+s.chunk_id;half.append(d);
+              }
+              for(const q of r.quotes||[]){
+                const d=document.createElement('div');
+                d.className='qt'+(q.verified?'':' bad');
+                d.textContent=(q.verified?'« ':'✗ выдумка: « ')
+                  +(q.text||'').slice(0,150)+' »';
+                half.append(d);
+              }
+            }
+            box.append(half);
+          }
+          pane.insertBefore(box,wait);
+          pane.scrollTop=pane.scrollHeight;
+        }
+        if(m.rag_done){
+          wait.remove();
+          const d=m.rag_done;
+          const box=document.createElement('div');box.className='sum';
+          box.innerHTML='<table><tbody>'
+            +`<tr><td>без документов</td><td>${d.plain}/${d.total}</td></tr>`
+            +`<tr><td>с документами</td><td>${d.rag}/${d.total}</td></tr>`
+            +`<tr><td>цитат подтверждено</td><td>${d.verified}</td></tr>`
+            +`<tr><td>выдуманных цитат</td><td>${d.fabricated}</td></tr>`
+            +'</tbody></table>';
+          if(d.rag>d.plain){
+            const note=document.createElement('div');note.className='note';
+            note.textContent='Маленькая модель не знает ответов, но умеет '
+              +'читать. Поиск по своим документам закрывает разрыв в знаниях — '
+              +'и всё это бесплатно, без сети и без утечки документов наружу.';
+            box.append(note);
+          }
+          pane.append(box);
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+async function ask(){
+  const question=$('#q').value.trim();
+  if(!question||busy){if(!question)$('#q').focus();return;}
+  busy=true;lock();
+  const wait=waiting('спрашиваю…');pane.prepend(wait);
+  try{
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question,cloud:$('#cloud').checked,model:picked})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.answer){
+          const a=m.answer;
+          const e=pane.querySelector('.empty');if(e)e.remove();
+          const box=document.createElement('div');box.className='answer';
+          box.innerHTML='<div class="tx"></div><div class="meta"></div>';
+          box.querySelector('.tx').textContent=a.text||'(пусто)';
+          box.querySelector('.meta').textContent=
+            `${a.where} · ${a.model} · ${a.seconds}с · ${a.tokens} ток. · `
+            +`${a.rate} ток/с`;
+          pane.insertBefore(box,wait.nextSibling);
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+/* ── чат ───────────────────────────────────────────────────────── */
+const chatPane=$('#chatPane'),msgEl=$('#msg'),sendMsgEl=$('#sendMsg');
+
+function chatEmpty(){
+  chatPane.replaceChildren($('#chatEmptyTpl').content.cloneNode(true));
+}
+function chatMsg(who,kind){
+  const e=chatPane.querySelector('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className='msg '+who;
+  d.innerHTML='<div class="bubble'+(kind?' '+kind:'')+'"></div>';
+  chatPane.append(d);return d.firstElementChild;
+}
+function chatLine(cls,html){
+  const e=chatPane.querySelector('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className=cls;d.innerHTML=html;
+  chatPane.append(d);return d;
+}
+const chatScroll=()=>chatPane.scrollTo({top:chatPane.scrollHeight,
+                                        behavior:'smooth'});
+
+function renderChat(chat){
+  chatPane.replaceChildren();
+  const history=(chat||{}).history||[];
+  if(!history.length){chatEmpty();}
+  else for(const turn of history)
+    chatMsg(turn.role==='user'?'me':'bot').textContent=turn.content;
+  const goal=((chat||{}).task||{}).goal;
+  if(goal)chatLine('goalline','<b>цель диалога:</b> '+esc(goal));
+  chatPane.scrollTop=chatPane.scrollHeight;
+}
+
+async function sendMessage(){
+  const message=msgEl.value.trim();
+  if(!message||busy)return;
+  busy=true;msgEl.value='';growMsg();syncMsg();lock();
+  chatMsg('me').textContent=message;
+  const wait=waiting('раскрываю вопрос, ищу, отвечаю…');
+  chatPane.append(wait);chatScroll();
+  try{
+    const res=await fetch('/chat',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message,cloud:$('#cloud').checked,model:picked})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){wait.remove();chatMsg('bot','err').textContent=m.error;break;}
+        if(m.turn){
+          wait.remove();
+          const r=m.turn,c=r.cited||{};
+          if(r.rewritten)chatLine('qline','<b>искал:</b> '+esc(r.query));
+          chatMsg('bot',c.confident?'':'refused')
+            .textContent=(r.answer||'(пусто)').trim();
+          const bits=[];
+          for(const s of c.sources||[])bits.push(esc(s.chunk_id));
+          const bad=(c.quotes||[]).filter(q=>!q.verified).length;
+          let line=bits.length?bits.join('<br>'):'источников нет';
+          if(bad)line+='<br><span class="bad">выдуманных цитат: '+bad+'</span>';
+          chatLine('srcline',line);
+          chatLine('srcline',`${r.where} · ${r.total_tokens} ток. · `
+            +`${r.wall_seconds}с`);
+          if((r.task||{}).goal)
+            chatLine('goalline','<b>цель диалога:</b> '+esc(r.task.goal));
+          chatScroll();
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){wait.remove();chatMsg('bot','err').textContent=String(e.message||e);}
+  finally{wait.remove();busy=false;lock();syncMsg();chatScroll();msgEl.focus();}
+}
+
+function syncMsg(){sendMsgEl.disabled=busy||!msgEl.value.trim();}
+function growMsg(){msgEl.style.height='auto';
+  msgEl.style.height=msgEl.scrollHeight+'px';}
+
+function showTab(which){
+  const chat=which==='chat';
+  $('#tabChat').classList.toggle('on',chat);
+  $('#tabBench').classList.toggle('on',!chat);
+  chatPane.style.display=chat?'flex':'none';
+  $('#composer').style.display=chat?'flex':'none';
+  $('#pane').style.display=chat?'none':'block';
+}
+
+function lock(){
+  for(const id of['ask','probe','rag'])$('#'+id).disabled=busy;
+  for(const id of['cloud','cold'])$('#'+id).disabled=busy;
+  syncMsg();
+}
+$('#ask').addEventListener('click',ask);
+$('#q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();ask();}});
+$('#probe').addEventListener('click',runProbe);
+$('#rag').addEventListener('click',runRag);
+$('#cloud').addEventListener('change',()=>{updateBar();loadChat();});
+$('#tabChat').addEventListener('click',()=>showTab('chat'));
+$('#tabBench').addEventListener('click',()=>showTab('bench'));
+msgEl.addEventListener('input',()=>{growMsg();syncMsg();});
+msgEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
+sendMsgEl.addEventListener('click',sendMessage);
+
+async function loadChat(){
+  const d=await post('/chat/clear',{model:picked,cloud:$('#cloud').checked});
+  if(d){apply(d);renderChat(d.chat);}
+}
+
+fetch('/state').then(r=>r.json()).then(d=>{
+  apply(d);
+  $('#note').textContent='модель выбирается слева · смена модели начинает '
+    +'новый диалог, чтобы история не смешивалась';
+  showEmpty();
+  chatEmpty();
+  showTab('chat');
+}).catch(()=>{showEmpty();chatEmpty();});
+</script>
+</body>
+</html>

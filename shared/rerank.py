@@ -127,9 +127,12 @@ class Retrieval:
                 "seconds": round(self.seconds, 2)}
 
 
-def rewrite_query(question: str, *, max_tokens: int = 120) -> tuple[str, dict]:
+def rewrite_query(question: str, *, max_tokens: int = 120,
+                  provider=None, model: str | None = None
+                  ) -> tuple[str, dict]:
     """Вопрос → поисковый запрос с терминами предметной области."""
     answer = ask(REWRITE_PROMPT.format(question=question),
+                 provider=provider, model=model,
                  max_tokens=max_tokens, temperature=0.0)
     query = " ".join((answer.text or "").split()).strip().strip('"«»')
     # Пустой или подозрительно длинный ответ — повод не трогать вопрос:
@@ -172,7 +175,8 @@ def _parse_scores(text: str, how_many: int) -> dict[int, float]:
 
 
 def rerank_with_llm(question: str, hits: list[Hit], *, keep: int = FINAL_K,
-                    max_tokens: int = 700) -> tuple[list[Hit], dict]:
+                    max_tokens: int = 700, provider=None,
+                    model: str | None = None) -> tuple[list[Hit], dict]:
     """Переупорядочить куски моделью и оставить лучшие.
 
     Куски даются сокращёнными: для оценки релевантности хватает первых
@@ -188,6 +192,7 @@ def rerank_with_llm(question: str, hits: list[Hit], *, keep: int = FINAL_K,
         for number, hit in enumerate(hits, 1))
 
     answer = ask(RERANK_PROMPT.format(question=question, excerpts=excerpts),
+                 provider=provider, model=model,
                  max_tokens=max_tokens, temperature=0.0, json_mode=True)
     scores = _parse_scores(answer.text, len(hits))
 
@@ -212,11 +217,16 @@ def rerank_with_llm(question: str, hits: list[Hit], *, keep: int = FINAL_K,
 def retrieve(question: str, *, index: Index | None = None,
              strategy: str = STRUCTURAL, wide_k: int = WIDE_K,
              final_k: int = FINAL_K, threshold: float | None = None,
-             rerank: bool = False, rewrite: bool = False) -> Retrieval:
+             rerank: bool = False, rewrite: bool = False,
+             provider=None, model: str | None = None) -> Retrieval:
     """Поиск со вторым этапом. Все приёмы отключаемы по отдельности.
 
     Отключаемость не роскошь: сравнивать режимы можно только тогда, когда
     между ними отличается ровно один приём.
+
+    `provider` и `model` добавлены в дне 26. Без них второй этап уходил
+    в облако, даже когда весь остальной чат работал на локальной модели —
+    и утверждение «всё локально» было бы неправдой.
     """
     import time
 
@@ -227,7 +237,8 @@ def retrieve(question: str, *, index: Index | None = None,
 
     query, rewritten = question, False
     if rewrite:
-        query, rewrite_usage = rewrite_query(question)
+        query, rewrite_usage = rewrite_query(question, provider=provider,
+                                             model=model)
         rewritten = query != question
         usage["total_tokens"] += int(rewrite_usage.get("total_tokens") or 0)
         stages.append({"stage": "rewrite", "done": rewritten,
@@ -250,7 +261,8 @@ def retrieve(question: str, *, index: Index | None = None,
 
     if rerank:
         before = len(hits)
-        hits, rerank_usage = rerank_with_llm(question, hits, keep=final_k)
+        hits, rerank_usage = rerank_with_llm(question, hits, keep=final_k,
+                                             provider=provider, model=model)
         usage["total_tokens"] += int(rerank_usage.get("total_tokens") or 0)
         stages.append({"stage": "rerank", "before": before,
                        "after": len(hits),

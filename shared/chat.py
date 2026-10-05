@@ -49,12 +49,20 @@ HISTORY_FOR_REWRITE = 4
 # для ответа контекст нужен шире, чем для переписывания запроса.
 HISTORY_FOR_ANSWER = 6
 
+# Пример в этом промпте был конкретным — и маленькие модели списывали его
+# дословно вместо того, чтобы применить образец. И 3B, и 7B на уточнение
+# «А на сколько именно?» выдавали ровно текст примера, про совсем другую
+# тему, и диалог уезжал. Облачная модель пример обобщала, локальные —
+# копировали. Поэтому образец теперь схематичный, без настоящих терминов.
 RESOLVE_PROMPT = """Перепиши последнюю реплику пользователя в самодостаточный
 поисковый запрос по документации проекта «AI Advent Challenge».
 
 Задача: раскрыть местоимения и восстановить опущенное, опираясь на историю
-и цель диалога. «Сколько именно?» после разговора о цене сжатия должно стать
-«сколько стоит сжатие истории диалога в токенах».
+и цель диалога.
+
+Как это работает: если говорили про ПРЕДМЕТ, а потом спросили «а почему?»,
+получится «почему ПРЕДМЕТ устроен так». Подставляй предмет из истории,
+а не из этого объяснения.
 
 Если реплика и так самодостаточна — верни её почти без изменений.
 Верни ТОЛЬКО запрос, одной строкой, без кавычек и пояснений.
@@ -208,6 +216,10 @@ class Reply:
     task_changed: bool = False
     rewrite_tokens: int = 0
     task_tokens: int = 0
+    # Токены второго этапа. Раньше они терялись: Reply считал только ответ,
+    # переписывание и память задачи, а реранкинг — нет, и в окне стояла
+    # одна и та же цифра независимо от того, включён он или выключен.
+    stage_tokens: int = 0
 
     @property
     def sources(self) -> list[dict]:
@@ -228,7 +240,7 @@ class Reply:
     @property
     def total_tokens(self) -> int:
         return (self.cited.total_tokens + self.rewrite_tokens
-                + self.task_tokens)
+                + self.task_tokens + self.stage_tokens)
 
     def as_dict(self) -> dict:
         return {"message": self.message, "query": self.query,
@@ -237,6 +249,7 @@ class Reply:
                 "task_changed": self.task_changed,
                 "rewrite_tokens": self.rewrite_tokens,
                 "task_tokens": self.task_tokens,
+                "stage_tokens": self.stage_tokens,
                 "total_tokens": self.total_tokens}
 
 
@@ -250,7 +263,8 @@ def _history_lines(turns: list[Turn], limit: int) -> str:
         for t in recent)
 
 
-def resolve_query(message: str, turns: list[Turn], task: TaskMemory
+def resolve_query(message: str, turns: list[Turn], task: TaskMemory,
+                  *, provider=None, model: str | None = None
                   ) -> tuple[str, bool, int]:
     """Уточнение → самодостаточный поисковый запрос.
 
@@ -266,7 +280,8 @@ def resolve_query(message: str, turns: list[Turn], task: TaskMemory
         history=_history_lines(turns, HISTORY_FOR_REWRITE),
         message=message)
     try:
-        reply = ask(prompt, max_tokens=140, temperature=0.0)
+        reply = ask(prompt, provider=provider, model=model,
+                    max_tokens=140, temperature=0.0)
     except LLMError:
         # Отказ переписывания не должен ломать диалог: ищем как есть.
         return message, False, 0
@@ -278,13 +293,15 @@ def resolve_query(message: str, turns: list[Turn], task: TaskMemory
     return query, query != message, tokens
 
 
-def update_task(task: TaskMemory, question: str, answer: str
+def update_task(task: TaskMemory, question: str, answer: str,
+                *, provider=None, model: str | None = None
                 ) -> tuple[TaskMemory, bool, int]:
     """Обновить память задачи по свежей паре реплик."""
     current = json.dumps(task.as_dict(), ensure_ascii=False, indent=2)
     try:
         reply = ask(TASK_PROMPT.format(current=current, question=question,
                                        answer=" ".join(answer.split())[:700]),
+                    provider=provider, model=model,
                     max_tokens=400, temperature=0.0, json_mode=True)
     except LLMError:
         return task, False, 0
@@ -319,7 +336,8 @@ class ChatSession:
                  strategy: str = STRUCTURAL, chunks: int = 5,
                  rerank: bool = True,
                  abstain_below: float | None = ABSTAIN_BELOW,
-                 track_task: bool = True):
+                 track_task: bool = True,
+                 provider=None, model: str | None = None):
         self.session = session or DEFAULT_SESSION
         self.store = store if store is not None else open_store("sqlite")
         self.index = index or Index()
@@ -329,6 +347,12 @@ class ChatSession:
         self.rerank = rerank
         self.abstain_below = abstain_below
         self.track_task = track_task
+        # День 26: тот же чат целиком на локальной модели. Провайдер
+        # прокидывается во все три обращения — раскрытие уточнения, ответ
+        # и обновление памяти задачи, — иначе половина диалога уходила бы
+        # в сеть, и «локально» было бы неправдой.
+        self.provider = provider
+        self.model = model
         self.task = self.tasks.load(self.session)
 
     # ── история ─────────────────────────────────────────────────────────
@@ -398,8 +422,9 @@ class ChatSession:
             raise LLMError("Пустая реплика")
 
         turns = self.transcript()
-        query, rewritten, rewrite_tokens = resolve_query(message, turns,
-                                                         self.task)
+        query, rewritten, rewrite_tokens = resolve_query(
+            message, turns, self.task, provider=self.provider,
+            model=self.model)
 
         retrieval = None
         if self.rerank:
@@ -409,19 +434,22 @@ class ChatSession:
 
             retrieval = retrieve(query, index=self.index, wide_k=WIDE_K,
                                  final_k=max(FINAL_K, self.chunks),
-                                 threshold=THRESHOLD, rerank=True)
+                                 threshold=THRESHOLD, rerank=True,
+                                 provider=self.provider, model=self.model)
 
         cited = answer_with_citations(
             query, index=self.index, strategy=self.strategy, k=self.chunks,
             abstain_below=self.abstain_below, retrieval=retrieval,
             system_prefix=self._prefix(turns),
             # Источники обязаны быть в каждом уверенном ответе.
-            require_citations=True)
+            require_citations=True,
+            provider=self.provider, model=self.model)
 
         task, changed, task_tokens = (self.task, False, 0)
         if self.track_task and not cited.abstained:
-            task, changed, task_tokens = update_task(self.task, message,
-                                                     cited.answer)
+            task, changed, task_tokens = update_task(
+                self.task, message, cited.answer, provider=self.provider,
+                model=self.model)
             self.task = task
             self.tasks.save(self.session, task)
 
@@ -435,7 +463,9 @@ class ChatSession:
         return Reply(message=message, query=query, rewritten=rewritten,
                      answer=cited.answer, cited=cited, task=task,
                      task_changed=changed, rewrite_tokens=rewrite_tokens,
-                     task_tokens=task_tokens)
+                     task_tokens=task_tokens,
+                     stage_tokens=int((retrieval.usage.get("total_tokens") or 0)
+                                      if retrieval else 0))
 
 
 __all__ = ["ChatSession", "TaskMemory", "TaskStore", "Reply",

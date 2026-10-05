@@ -59,6 +59,7 @@
 | 23 | Реранкинг и фильтрация | [days/day-23-rerank](days/day-23-rerank) | ✅ код готов, нужно видео |
 | 24 | Цитаты и анти-галлюцинации | [days/day-24-citations](days/day-24-citations) | ✅ код готов, нужно видео |
 | 25 | Мини-чат с RAG и памятью | [days/day-25-chat](days/day-25-chat) | ✅ код готов, нужно видео |
+| 26 | Локальная LLM | [days/day-26-local-llm](days/day-26-local-llm) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 

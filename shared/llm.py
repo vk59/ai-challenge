@@ -41,6 +41,11 @@ class Provider:
     base_url: str
     key_var: str
     console: str            # где взять ключ, подставляется в текст ошибки
+    # День 26: локальной модели ключ не нужен. Без этого признака пришлось
+    # бы выдумывать фальшивый ключ и класть его в .env — а это приучает
+    # к мысли, что ключ нужен всегда.
+    needs_key: bool = True
+    local: bool = False
 
 
 DEEPSEEK = Provider(
@@ -51,6 +56,16 @@ OPENROUTER = Provider(
     "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
     "https://openrouter.ai/keys",
 )
+# День 26: модель на этой же машине. Ollama держит OpenAI-совместимый
+# эндпоинт на /v1, поэтому весь остальной код менять не пришлось —
+# провайдер отличается только адресом и отсутствием ключа.
+LOCAL = Provider(
+    "Local", "http://127.0.0.1:11434/v1", "OLLAMA_HOST",
+    "https://ollama.com/download", needs_key=False, local=True,
+)
+
+LOCAL_MODEL_VAR = "AI_ADVENT_LOCAL_MODEL"
+DEFAULT_LOCAL_MODEL = "qwen2.5:3b"
 
 
 @dataclass
@@ -230,7 +245,7 @@ def _build_request(
     provider = provider or DEEPSEEK
 
     api_key = os.environ.get(provider.key_var, "").strip()
-    if not api_key:
+    if not api_key and provider.needs_key:
         raise LLMError(
             f"Не найден {provider.key_var}.\n"
             f"Впиши ключ в файл .env в корне репозитория "
@@ -240,8 +255,18 @@ def _build_request(
     base_url = provider.base_url
     if provider is DEEPSEEK:
         base_url = os.environ.get("DEEPSEEK_BASE_URL", base_url)
+    if provider.local:
+        # OLLAMA_HOST задают как host:port, без /v1 — приводим к адресу.
+        host = os.environ.get("OLLAMA_HOST", "").strip()
+        if host:
+            if not host.startswith("http"):
+                host = "http://" + host
+            base_url = host.rstrip("/") + "/v1"
     base_url = base_url.rstrip("/")
-    model = model or os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL)
+    if provider.local:
+        model = model or os.environ.get(LOCAL_MODEL_VAR, DEFAULT_LOCAL_MODEL)
+    else:
+        model = model or os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL)
 
     messages = []
     if system:
@@ -267,14 +292,17 @@ def _build_request(
     if stream:
         body["stream_options"] = {"include_usage": True}
 
+    headers = {"Content-Type": "application/json"}
+    # Локальной модели заголовок с ключом не нужен; Ollama его игнорирует,
+    # но посылать «Bearer » с пустым значением — приучать себя к мусору.
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
     request = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
     )
     return request, model
 

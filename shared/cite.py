@@ -262,7 +262,8 @@ def answer_with_citations(
         temperature: float = 0.1,
         system_prefix: str | None = None,
         history: list[dict] | None = None,
-        require_citations: bool = False) -> CitedAnswer:
+        require_citations: bool = False,
+        provider=None, model: str | None = None) -> CitedAnswer:
     """Вопрос → ответ с проверенными цитатами, либо честный отказ.
 
     `retrieval` подставляет готовую выдачу — например из дня 23,
@@ -273,7 +274,12 @@ def answer_with_citations(
     Требования к цитатам при этом не меняются — приставка идёт ПЕРЕД
     правилами, а не вместо них.
 
-    `require_citations` — оттуда же. С длинной историей модель иногда
+    `provider` и `model` добавлены в дне 26: те же цитаты с той же проверкой,
+    но на модели, запущенной локально. Проверка дословности от провайдера
+    не зависит вовсе — она сверяет текст с куском, а не с тем, кто текст
+    написал.
+
+    `require_citations` — из дня 25. С длинной историей модель иногда
     отвечает уверенно, но поля "sources" и "quotes" оставляет пустыми:
     контекст разговора перетягивает внимание с формата. Один повторный
     запрос с прямым напоминанием это исправляет. По умолчанию выключено,
@@ -311,8 +317,9 @@ def answer_with_citations(
         system = f"{system_prefix.strip()}\n\n{system}"
 
     started = time.monotonic()
-    reply = ask(question, system=system, history=history,
-                max_tokens=max_tokens, temperature=temperature, json_mode=True)
+    reply = ask(question, system=system, history=history, provider=provider,
+                model=model, max_tokens=max_tokens, temperature=temperature,
+                json_mode=True)
 
     # Пустой ответ. Модель изредка возвращает одни пробелы — попался
     # в дне 25 на трёх репликах из двенадцати в длинном диалоге, причём
@@ -324,8 +331,8 @@ def answer_with_citations(
     while not (reply.text or "").strip() and blank_retries < 2:
         blank_retries += 1
         reply = ask(question, system=system, history=history,
-                    max_tokens=max_tokens, temperature=temperature,
-                    json_mode=True)
+                    provider=provider, model=model, max_tokens=max_tokens,
+                    temperature=temperature, json_mode=True)
     spent = time.monotonic() - started
 
     if not (reply.text or "").strip():
@@ -400,7 +407,8 @@ def answer_with_citations(
             abstain_below=None, retrieval=retrieval, max_tokens=max_tokens,
             temperature=temperature,
             system_prefix=f"{system_prefix or ''}\n\n{REMINDER}".strip(),
-            history=history, require_citations=False)
+            history=history, require_citations=False,
+            provider=provider, model=model)
         again.retried = True
         again.usage = {
             key: int(result.usage.get(key) or 0) + int(again.usage.get(key) or 0)
