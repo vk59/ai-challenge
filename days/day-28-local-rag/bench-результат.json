@@ -1,0 +1,715 @@
+{
+  "runs": 3,
+  "summaries": [
+    {
+      "backend": "local",
+      "label": "qwen-3b",
+      "model": "qwen2.5:3b",
+      "questions": 10,
+      "runs": 30,
+      "right": 22,
+      "sources_ok": 21,
+      "verified": 4,
+      "fabricated": 27,
+      "steady": 9,
+      "blank": 0,
+      "parse_failed": 0,
+      "abstained": 0,
+      "median": 1.6961148754926398,
+      "p95": 3.473262584011536,
+      "fastest": 1.357315708999522,
+      "slowest": 3.8838903330033645,
+      "spread": 0.6895311547695463,
+      "tokens": 73021
+    },
+    {
+      "backend": "local",
+      "label": "qwen-7b",
+      "model": "qwen2.5:7b",
+      "questions": 10,
+      "runs": 30,
+      "right": 24,
+      "sources_ok": 27,
+      "verified": 29,
+      "fabricated": 7,
+      "steady": 10,
+      "blank": 0,
+      "parse_failed": 0,
+      "abstained": 0,
+      "median": 2.8411764580232557,
+      "p95": 4.740839292004239,
+      "fastest": 1.4090646249824204,
+      "slowest": 7.38293366698781,
+      "spread": 1.0638027042088591,
+      "tokens": 71600
+    },
+    {
+      "backend": "cloud",
+      "label": "cloud",
+      "model": "deepseek (облако)",
+      "questions": 10,
+      "runs": 30,
+      "right": 27,
+      "sources_ok": 27,
+      "verified": 54,
+      "fabricated": 1,
+      "steady": 10,
+      "blank": 0,
+      "parse_failed": 0,
+      "abstained": 0,
+      "median": 1.4640694999834523,
+      "p95": 1.845187209022697,
+      "fastest": 1.1566567920381203,
+      "slowest": 2.269178750051651,
+      "spread": 0.2423581753713353,
+      "tokens": 61434
+    }
+  ],
+  "details": [
+    {
+      "backend": "local",
+      "rows": [
+        {
+          "n": 1,
+          "question": "Какой MRR получился у структурной нарезки при сравнении стратегий chunking?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7341,
+          "seconds": [
+            1.4050022499868646,
+            1.357315708999522,
+            1.3637007500510663
+          ],
+          "median": 1.3637007500510663
+        },
+        {
+          "n": 2,
+          "question": "Сколько всего инструментов получилось, когда подключили три MCP-сервера сразу?",
+          "runs": 3,
+          "ok": 3,
+          "right": 0,
+          "steady": true,
+          "sources_ok": 0,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 5795,
+          "seconds": [
+            2.523627665999811,
+            1.6837080420227721,
+            1.6168131669983268
+          ],
+          "median": 1.6837080420227721
+        },
+        {
+          "n": 3,
+          "question": "Какая модель используется для эмбеддингов и почему не DeepSeek?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7083,
+          "seconds": [
+            1.5348282500053756,
+            1.5195123329758644,
+            1.5194219169788994
+          ],
+          "median": 1.5195123329758644
+        },
+        {
+          "n": 4,
+          "question": "Что build_app.sh кладёт в Application Support, чтобы собранное приложение могло читать историю репозитория?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 5866,
+          "seconds": [
+            1.6720063330139965,
+            1.516775708005298,
+            1.505683958006557
+          ],
+          "median": 1.516775708005298
+        },
+        {
+          "n": 5,
+          "question": "В пайплайне нашлось 6307 знаков. Сколько знаков вернулось в модель вместо них?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7932,
+          "seconds": [
+            1.5334822909790091,
+            1.572347584005911,
+            1.5105011250125244
+          ],
+          "median": 1.5334822909790091
+        },
+        {
+          "n": 6,
+          "question": "Какое поле артефакта позволяет размотать цепочку назад до исходного поиска?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7738,
+          "seconds": [
+            2.8964707090053707,
+            2.8352139169583097,
+            3.31485787499696
+          ],
+          "median": 2.8964707090053707
+        },
+        {
+          "n": 7,
+          "question": "Почему метод хранилища артефактов назвали recent, а не list?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 0,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7698,
+          "seconds": [
+            1.7085217089625075,
+            2.321643250004854,
+            1.6628744169720449
+          ],
+          "median": 1.7085217089625075
+        },
+        {
+          "n": 8,
+          "question": "Задача по расписанию не выполнилась, потому что компьютер спал. Как это называется в планировщике и что произойдёт?",
+          "runs": 3,
+          "ok": 3,
+          "right": 0,
+          "steady": true,
+          "sources_ok": 0,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 6697,
+          "seconds": [
+            2.3813350830459967,
+            2.695986083999742,
+            2.56810224999208
+          ],
+          "median": 2.56810224999208
+        },
+        {
+          "n": 9,
+          "question": "Чем отличается запись одной реплики в JsonStore от записи в SqliteStore?",
+          "runs": 3,
+          "ok": 3,
+          "right": 1,
+          "steady": false,
+          "sources_ok": 3,
+          "verified": 1,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7961,
+          "seconds": [
+            2.757535042008385,
+            3.473262584011536,
+            2.356006290996447
+          ],
+          "median": 2.757535042008385
+        },
+        {
+          "n": 10,
+          "question": "Чем ограничен цикл вызова инструментов, чтобы агент не крутился бесконечно?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 8910,
+          "seconds": [
+            3.8838903330033645,
+            1.9938852500054054,
+            1.988896124996245
+          ],
+          "median": 1.9938852500054054
+        }
+      ]
+    },
+    {
+      "backend": "local",
+      "rows": [
+        {
+          "n": 1,
+          "question": "Какой MRR получился у структурной нарезки при сравнении стратегий chunking?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 6,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7422,
+          "seconds": [
+            3.0706842079525813,
+            3.0734545000013895,
+            3.0873177500325255
+          ],
+          "median": 3.0734545000013895
+        },
+        {
+          "n": 2,
+          "question": "Сколько всего инструментов получилось, когда подключили три MCP-сервера сразу?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 0,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 5757,
+          "seconds": [
+            4.740839292004239,
+            2.8328823749907315,
+            2.832650249998551
+          ],
+          "median": 2.8328823749907315
+        },
+        {
+          "n": 3,
+          "question": "Какая модель используется для эмбеддингов и почему не DeepSeek?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7011,
+          "seconds": [
+            2.2951477500027977,
+            2.400010042008944,
+            2.268008832994383
+          ],
+          "median": 2.2951477500027977
+        },
+        {
+          "n": 4,
+          "question": "Что build_app.sh кладёт в Application Support, чтобы собранное приложение могло читать историю репозитория?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 5961,
+          "seconds": [
+            3.5885635830345564,
+            3.554565917002037,
+            3.5598022919730283
+          ],
+          "median": 3.5598022919730283
+        },
+        {
+          "n": 5,
+          "question": "В пайплайне нашлось 6307 знаков. Сколько знаков вернулось в модель вместо них?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7728,
+          "seconds": [
+            1.427277916984167,
+            1.415158584015444,
+            1.4090646249824204
+          ],
+          "median": 1.415158584015444
+        },
+        {
+          "n": 6,
+          "question": "Какое поле артефакта позволяет размотать цепочку назад до исходного поиска?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7320,
+          "seconds": [
+            2.7236651250277646,
+            2.706233999982942,
+            2.698980749992188
+          ],
+          "median": 2.706233999982942
+        },
+        {
+          "n": 7,
+          "question": "Почему метод хранилища артефактов назвали recent, а не list?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 0,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7626,
+          "seconds": [
+            3.028386500023771,
+            3.005984457966406,
+            2.9987033330253325
+          ],
+          "median": 3.005984457966406
+        },
+        {
+          "n": 8,
+          "question": "Задача по расписанию не выполнилась, потому что компьютер спал. Как это называется в планировщике и что произойдёт?",
+          "runs": 3,
+          "ok": 3,
+          "right": 0,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 6424,
+          "seconds": [
+            2.8585700420080684,
+            2.8309572909493,
+            2.84947054105578
+          ],
+          "median": 2.84947054105578
+        },
+        {
+          "n": 9,
+          "question": "Чем отличается запись одной реплики в JsonStore от записи в SqliteStore?",
+          "runs": 3,
+          "ok": 3,
+          "right": 0,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 3,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7518,
+          "seconds": [
+            2.29196200001752,
+            2.270784124964848,
+            2.259085999976378
+          ],
+          "median": 2.270784124964848
+        },
+        {
+          "n": 10,
+          "question": "Чем ограничен цикл вызова инструментов, чтобы агент не крутился бесконечно?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 2,
+          "fabricated": 1,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 8833,
+          "seconds": [
+            7.38293366698781,
+            3.111514625023119,
+            3.126878792012576
+          ],
+          "median": 3.126878792012576
+        }
+      ]
+    },
+    {
+      "backend": "cloud",
+      "rows": [
+        {
+          "n": 1,
+          "question": "Какой MRR получился у структурной нарезки при сравнении стратегий chunking?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 6,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 6991,
+          "seconds": [
+            1.2173413750133477,
+            1.3417824589996599,
+            1.521465125028044
+          ],
+          "median": 1.3417824589996599
+        },
+        {
+          "n": 2,
+          "question": "Сколько всего инструментов получилось, когда подключили три MCP-сервера сразу?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 5228,
+          "seconds": [
+            1.2211725829984061,
+            1.1970068330410868,
+            1.2161264580208808
+          ],
+          "median": 1.2161264580208808
+        },
+        {
+          "n": 3,
+          "question": "Какая модель используется для эмбеддингов и почему не DeepSeek?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 4762,
+          "seconds": [
+            1.1823466250207275,
+            1.5130288749933243,
+            1.1566567920381203
+          ],
+          "median": 1.1823466250207275
+        },
+        {
+          "n": 4,
+          "question": "Что build_app.sh кладёт в Application Support, чтобы собранное приложение могло читать историю репозитория?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 9,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 6108,
+          "seconds": [
+            1.845187209022697,
+            1.6447777500143275,
+            1.7252164169913158
+          ],
+          "median": 1.7252164169913158
+        },
+        {
+          "n": 5,
+          "question": "В пайплайне нашлось 6307 знаков. Сколько знаков вернулось в модель вместо них?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 3,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 5937,
+          "seconds": [
+            1.2461093330057338,
+            1.3159377920092084,
+            1.3876751670031808
+          ],
+          "median": 1.3159377920092084
+        },
+        {
+          "n": 6,
+          "question": "Какое поле артефакта позволяет размотать цепочку назад до исходного поиска?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 7,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7075,
+          "seconds": [
+            1.4667663329746574,
+            1.560696790984366,
+            1.4178391250316054
+          ],
+          "median": 1.4667663329746574
+        },
+        {
+          "n": 7,
+          "question": "Почему метод хранилища артефактов назвали recent, а не list?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 6,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 6920,
+          "seconds": [
+            1.839083832979668,
+            1.461372666992247,
+            1.5730904579977505
+          ],
+          "median": 1.5730904579977505
+        },
+        {
+          "n": 8,
+          "question": "Задача по расписанию не выполнилась, потому что компьютер спал. Как это называется в планировщике и что произойдёт?",
+          "runs": 3,
+          "ok": 3,
+          "right": 0,
+          "steady": true,
+          "sources_ok": 0,
+          "verified": 0,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 4930,
+          "seconds": [
+            1.3901954169850796,
+            1.4124231659807265,
+            1.437870959052816
+          ],
+          "median": 1.4124231659807265
+        },
+        {
+          "n": 9,
+          "question": "Чем отличается запись одной реплики в JsonStore от записи в SqliteStore?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 9,
+          "fabricated": 0,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 6387,
+          "seconds": [
+            1.526617959025316,
+            1.7267541670007631,
+            1.5073078750283457
+          ],
+          "median": 1.526617959025316
+        },
+        {
+          "n": 10,
+          "question": "Чем ограничен цикл вызова инструментов, чтобы агент не крутился бесконечно?",
+          "runs": 3,
+          "ok": 3,
+          "right": 3,
+          "steady": true,
+          "sources_ok": 3,
+          "verified": 8,
+          "fabricated": 1,
+          "abstained": 0,
+          "blank": 0,
+          "parse_failed": 0,
+          "tokens": 7096,
+          "seconds": [
+            1.7440395419835113,
+            1.667128707980737,
+            2.269178750051651
+          ],
+          "median": 1.7440395419835113
+        }
+      ]
+    }
+  ]
+}
