@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Офлайн-помощник по документации</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --bubble:#e9e9eb;--field:#fff;--border:rgba(0,0,0,.12);
+    --hairline:rgba(0,0,0,.08);--accent:#007aff;--code-bg:rgba(0,0,0,.05);
+    --danger:#d70015;--danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--warn:#ff9f0a;--goal:#5e5ce6;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --bubble:#3a3a3c;--field:#2c2c2e;--border:rgba(255,255,255,.14);
+    --hairline:rgba(255,255,255,.10);--accent:#0a84ff;--code-bg:rgba(255,255,255,.07);
+    --danger:#ff6961;--danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--warn:#ffb340;--goal:#7d7aff;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1280px);height:min(100%,840px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:25px;padding:0 11px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  .body{flex:1;min-height:0;display:flex}
+  .aside{flex:none;width:238px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column;
+    overflow-y:auto}
+  .aside header{flex:none;display:flex;align-items:center;padding:9px 11px 6px;
+    font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.04em}
+  .aside header button{margin-left:auto;font:inherit;font-size:10.5px;
+    text-transform:none;letter-spacing:0;padding:1px 6px;background:var(--field);
+    border:.5px solid var(--border);border-radius:5px;color:var(--muted);
+    cursor:pointer}
+
+  /* Счётчик обращений наружу — главное в этом дне. */
+  .net{margin:0 10px 10px;padding:11px 12px;border-radius:10px;
+    border:.5px solid;text-align:center}
+  .net.clean{background:rgba(52,199,89,.14);
+    border-color:color-mix(in srgb,var(--ok) 48%,transparent)}
+  .net.dirty{background:var(--danger-bg);
+    border-color:color-mix(in srgb,var(--danger) 50%,transparent)}
+  .net .big{font-size:34px;font-weight:800;line-height:1.05;
+    font-variant-numeric:tabular-nums}
+  .net.clean .big{color:var(--ok)}
+  .net.dirty .big{color:var(--danger)}
+  .net .cap{font-size:11px;color:var(--muted);margin-top:2px}
+  .net .hosts{margin-top:5px;font-size:10.5px;color:var(--danger);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+  .net .inside{margin-top:4px;font-size:10.5px;color:var(--muted)}
+
+  .pick{margin:0 10px 9px;display:flex;gap:5px}
+  .pick button{flex:1;font:inherit;font-size:11.5px;padding:5px 6px;
+    color:var(--muted);background:var(--field);border:.5px solid var(--border);
+    border-radius:7px;cursor:pointer}
+  .pick button.on{color:var(--text);font-weight:650;border-color:var(--accent);
+    box-shadow:inset 0 0 0 1px var(--accent)}
+  .facts{margin:0 10px 9px;padding:7px 9px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;font-size:11px}
+  .facts table{width:100%;border-collapse:collapse}
+  .facts td{padding:1px 0;color:var(--muted);vertical-align:top}
+  .facts td+td{text-align:right;color:var(--text);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+  .goal{margin:0 10px 9px;padding:7px 9px;border-radius:8px;
+    background:color-mix(in srgb,var(--goal) 14%,transparent);
+    border:.5px solid color-mix(in srgb,var(--goal) 38%,transparent);
+    font-size:11.5px}
+  .goal .ttl{font-size:10px;text-transform:uppercase;letter-spacing:.03em;
+    font-weight:700;color:var(--goal)}
+  .nothing{font-size:11px;color:var(--muted);font-style:italic;padding:2px 11px 8px}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:14px;display:flex;
+    flex-direction:column;gap:9px}
+  .msg{display:flex;flex-direction:column}
+  .msg.me{align-items:flex-end}.msg.bot{align-items:flex-start}
+  .bubble{max-width:88%;padding:8px 13px;border-radius:17px;
+    overflow-wrap:anywhere;white-space:pre-wrap}
+  .me .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:5px}
+  .bot .bubble{background:var(--bubble);border-bottom-left-radius:5px}
+  .bot .bubble.refused{background:rgba(255,159,10,.16)}
+  .bot .bubble.gated{background:var(--danger-bg)}
+  .bot .bubble.err{background:var(--danger-bg);color:var(--danger)}
+  .qline{max-width:88%;font-size:11px;color:var(--muted);padding:2px 10px;
+    background:var(--code-bg);border-radius:9px;overflow-wrap:anywhere}
+  .qline b{color:var(--text);font-weight:600}
+  .srcline{max-width:88%;font-size:10.5px;color:var(--muted);padding:2px 10px;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+  .srcline .bad{color:var(--danger)}
+  .netline{max-width:88%;font-size:11px;padding:3px 9px;border-radius:7px}
+  .netline.clean{background:rgba(52,199,89,.14);color:var(--ok)}
+  .netline.dirty{background:var(--danger-bg);color:var(--danger)}
+  .composer{flex:none;display:flex;align-items:flex-end;gap:8px;padding:9px 12px;
+    background:var(--chrome);border-top:.5px solid var(--hairline)}
+  .composer textarea{flex:1;resize:none;max-height:90px;padding:7px 12px;font:inherit;
+    color:var(--text);background:var(--field);border:.5px solid var(--border);
+    border-radius:16px;outline:none}
+  .send{flex:none;width:30px;height:30px;display:grid;place-items:center;font-size:15px;
+    color:#fff;background:var(--accent);border:0;border-radius:50%;cursor:pointer}
+  .send:disabled{background:var(--bubble);color:var(--muted);cursor:default}
+  .thinking{display:flex;gap:7px;align-items:center;font-size:12px;color:var(--muted)}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+  .empty{margin:auto;text-align:center;max-width:480px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .proof{background:var(--field);border:.5px solid var(--border);
+    border-radius:10px;padding:10px 12px;font-size:12px}
+  .proof .step{padding:3px 0;border-bottom:.5px solid var(--hairline)}
+  .proof .step:last-child{border-bottom:0}
+  .proof .step b{font-weight:600}
+  .proof .step .m{color:var(--muted);font-size:11px}
+  .proof .verdict{margin-top:8px;padding:7px 10px;border-radius:8px;
+    font-size:12.5px;font-weight:600}
+  .proof .verdict.ok{background:rgba(52,199,89,.16);color:var(--ok)}
+  .proof .verdict.no{background:var(--danger-bg);color:var(--danger)}
+  .err{background:var(--danger-bg);color:var(--danger);padding:8px 11px;
+    border-radius:8px;font-size:12px}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1120px){.aside{width:200px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b>Офлайн-помощник</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="aside">
+      <header>Обращения наружу <button id="resetNet">сбросить</button></header>
+      <div id="net"></div>
+      <header>Где считается</header>
+      <div class="pick" id="pick"></div>
+      <div class="facts" id="facts"></div>
+      <header>Цель диалога</header>
+      <div id="goal"></div>
+      <header>Проверка</header>
+      <div style="padding:0 10px 10px">
+        <button class="btn" id="proof" style="width:100%">Доказать офлайн</button>
+        <button class="btn" id="clear" style="width:100%;margin-top:5px">Очистить чат</button>
+      </div>
+    </nav>
+
+    <div class="main">
+      <div class="pane" id="pane"></div>
+      <footer class="composer">
+        <textarea id="msg" rows="1" placeholder="Спросите про проект — всё считается на этой машине…"></textarea>
+        <button class="send" id="send" disabled title="Отправить (Enter)">↑</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>ответы <b id="am">—</b></span>
+    <span>эмбеддинги <b id="em">—</b></span>
+    <span>индекс <b id="ix">—</b></span>
+    <span>порог отказа <b id="th">—</b></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">✈️</div>
+    <h2>Помощник, который не выходит в сеть</h2>
+    <p>Модель и эмбеддинги работают через Ollama на этой машине.
+       Слева счётчик обращений наружу — он должен стоять на нуле всё
+       время, пока вы разговариваете. Кнопка «Доказать офлайн» закрывает
+       сеть совсем и прогоняет диалог.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const pane=$('#pane'),msgEl=$('#msg'),sendEl=$('#send');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;');
+const num=n=>(n??0).toLocaleString('ru');
+const scroll=()=>pane.scrollTo({top:pane.scrollHeight,behavior:'smooth'});
+
+function showEmpty(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function addMsg(who,kind){
+  const e=pane.querySelector('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className='msg '+who;
+  d.innerHTML='<div class="bubble'+(kind?' '+kind:'')+'"></div>';
+  pane.append(d);return d.firstElementChild;
+}
+function addLine(cls,html){
+  const e=pane.querySelector('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className=cls;d.innerHTML=html;
+  pane.append(d);return d;
+}
+function waiting(text){
+  const d=document.createElement('div');d.className='thinking';
+  d.innerHTML='<div class="dots"><i></i><i></i><i></i></div><span></span>';
+  d.querySelector('span').textContent=text;return d;
+}
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const d=await r.json();
+  if(d.error){alert(d.error);return null;}
+  return d;
+}
+
+/* ── счётчик ───────────────────────────────────────────────────── */
+function renderNet(){
+  const n=state.net||{outside:0,local:0,hosts:[]};
+  const box=$('#net');
+  box.className='net '+(n.outside?'dirty':'clean');
+  box.innerHTML='<div class="big"></div><div class="cap"></div>'
+    +'<div class="hosts"></div><div class="inside"></div>';
+  box.querySelector('.big').textContent=num(n.outside);
+  box.querySelector('.cap').textContent=n.outside
+    ?'обращений в сеть':'обращений в сеть — ни одного';
+  const hosts=box.querySelector('.hosts');
+  if((n.hosts||[]).length)hosts.textContent=n.hosts.join(', ');
+  else hosts.remove();
+  box.querySelector('.inside').textContent='на 127.0.0.1: '+num(n.local);
+}
+function renderPick(){
+  const box=$('#pick');box.replaceChildren();
+  for(const[key,label]of[['local','локально'],['cloud','облако']]){
+    const b=document.createElement('button');
+    b.textContent=label;
+    b.className=state.backend===key?'on':'';
+    b.disabled=busy;
+    b.onclick=async()=>{
+      if(busy||state.backend===key)return;
+      busy=true;sync();
+      const d=await post('/backend',{backend:key});
+      busy=false;
+      if(d){apply(d);renderHistory(d.history);}
+      sync();
+    };
+    box.append(b);
+  }
+}
+function renderFacts(){
+  const idx=state.index||{};
+  $('#facts').innerHTML='<table><tbody>'
+    +`<tr><td>модель ответа</td><td>${esc(state.answer_model||'—')}</td></tr>`
+    +`<tr><td>эмбеддинги</td><td>${esc((state.embedding_model||'—').split('/').pop())}</td></tr>`
+    +`<tr><td>измерений</td><td>${num(state.dim)}</td></tr>`
+    +`<tr><td>индекс</td><td>${esc(idx.file||'—')}</td></tr>`
+    +`<tr><td>кусков</td><td>${num(idx.chunks)}</td></tr>`
+    +`<tr><td>порог отказа</td><td>${state.threshold??'—'}</td></tr>`
+    +'</tbody></table>';
+}
+function renderGoal(){
+  const box=$('#goal');box.replaceChildren();
+  const goal=(state.task||{}).goal;
+  if(!goal){
+    box.append(Object.assign(document.createElement('div'),
+      {className:'nothing',textContent:'появится после первой реплики'}));
+    return;
+  }
+  const d=document.createElement('div');d.className='goal';
+  d.innerHTML='<div class="ttl">цель</div><div class="v"></div>';
+  d.querySelector('.v').textContent=goal;
+  box.append(d);
+}
+function apply(next){
+  if(!next)return;
+  state={...state,...next};
+  $('#am').textContent=state.answer_model||'—';
+  $('#em').textContent=(state.embedding_model||'—').split('/').pop();
+  const idx=state.index||{};
+  $('#ix').textContent=num(idx.chunks)+' кусков';
+  $('#th').textContent=state.threshold??'—';
+  $('#subtitle').textContent=state.backend==='local'
+    ?'всё считается на этой машине':'через облако, для сравнения';
+  renderNet();renderPick();renderFacts();renderGoal();
+}
+function renderHistory(history){
+  pane.replaceChildren();
+  if(!history||!history.length){showEmpty();return;}
+  for(const turn of history)
+    addMsg(turn.role==='user'?'me':'bot').textContent=turn.content;
+  pane.scrollTop=pane.scrollHeight;
+}
+
+async function send(){
+  const message=msgEl.value.trim();
+  if(!message||busy)return;
+  busy=true;msgEl.value='';grow();sync();
+  addMsg('me').textContent=message;
+  const wait=waiting('ищу в индексе и отвечаю…');pane.append(wait);scroll();
+  try{
+    const res=await fetch('/ask',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){wait.remove();addMsg('bot','err').textContent=m.error;break;}
+        if(m.reply){
+          wait.remove();
+          const r=m.reply,c=r.cited||{};
+          if(r.rewritten)addLine('qline','<b>искал:</b> '+esc(r.query));
+          addMsg('bot',c.abstained?'gated':(c.confident?'':'refused'))
+            .textContent=(r.answer||'(пусто)').trim();
+          const srcs=(c.sources||[]).map(s=>esc(s.chunk_id));
+          const bad=(c.quotes||[]).filter(q=>!q.verified).length;
+          let line=srcs.length?srcs.join('<br>'):'источников нет';
+          if(bad)line+='<br><span class="bad">выдуманных цитат: '+bad+'</span>';
+          addLine('srcline',line);
+          const net=r.net||{outside:0,local:0};
+          addLine('netline '+(net.outside?'dirty':'clean'),
+            net.outside
+              ? `⚠ за эту реплику ушло наружу: ${net.outside} `
+                +`(${esc((net.hosts||[]).join(', '))})`
+              : `✓ наружу не ходили · на 127.0.0.1: ${net.local} · `
+                +`${r.total_tokens} ток. · ${r.wall_seconds}с`);
+          scroll();
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){wait.remove();addMsg('bot','err').textContent=String(e.message||e);}
+  finally{wait.remove();busy=false;sync();scroll();msgEl.focus();}
+}
+
+async function runProof(){
+  if(busy)return;
+  busy=true;sync();
+  pane.replaceChildren();
+  const box=document.createElement('div');box.className='proof';
+  box.innerHTML='<div class="head"></div>';
+  pane.append(box);
+  const wait=waiting('сеть закрыта, идёт диалог…');pane.append(wait);
+  try{
+    const res=await fetch('/proof',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:'{}'});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){wait.remove();
+          pane.append(Object.assign(document.createElement('div'),
+            {className:'err',textContent:m.error}));break;}
+        if(m.proof_start)
+          box.querySelector('.head').innerHTML=
+            `<b>Сеть закрыта.</b> Любое соединение, кроме 127.0.0.1, `
+            +`поднимает исключение. ${m.proof_start.steps} реплики, `
+            +`бэкенд ${esc(m.proof_start.backend)}.`;
+        if(m.proof_step){
+          const s=m.proof_step;
+          const d=document.createElement('div');d.className='step';
+          const mark=s.abstained?'отказ по порогу'
+            :(s.confident?('источников '+(s.sources||[]).length)
+                         :'модель отказалась');
+          d.innerHTML='<b></b><div class="m"></div>';
+          d.querySelector('b').textContent=s.n+'. '+s.message;
+          d.querySelector('.m').textContent=
+            (s.rewritten?'искал: '+s.query+' · ':'')+mark+' — '
+            +(s.answer||'').split(/\s+/).slice(0,20).join(' ')+'…';
+          box.append(d);
+        }
+        if(m.proof_done){
+          wait.remove();
+          const d=document.createElement('div');
+          d.className='verdict '+(m.proof_done.ok?'ok':'no');
+          d.textContent=m.proof_done.ok
+            ?'Диалог прошёл целиком. Попыток выйти наружу: 0.'
+            :('ПРОВАЛ: код вышел в сеть — '
+              +(m.proof_done.attempts||[]).join(', '));
+          box.append(d);
+        }
+        if(m.done)apply(m);
+      }
+    }
+  }catch(e){wait.remove();
+    pane.append(Object.assign(document.createElement('div'),
+      {className:'err',textContent:String(e.message||e)}));}
+  finally{wait.remove();busy=false;sync();}
+}
+
+function sync(){
+  sendEl.disabled=busy||!msgEl.value.trim();
+  for(const id of['proof','clear'])$('#'+id).disabled=busy;
+  renderPick();
+}
+function grow(){msgEl.style.height='auto';
+  msgEl.style.height=msgEl.scrollHeight+'px';}
+msgEl.addEventListener('input',()=>{grow();sync();});
+msgEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+sendEl.addEventListener('click',send);
+$('#proof').addEventListener('click',runProof);
+$('#resetNet').addEventListener('click',async()=>{
+  const d=await post('/net/reset');if(d)apply(d);});
+$('#clear').addEventListener('click',async()=>{
+  const d=await post('/chat/clear');if(d){apply(d);renderHistory(d.history);}});
+
+// Счётчик обновляем сам по себе: видно, что в простое наружу тоже тихо.
+setInterval(async()=>{
+  if(busy)return;
+  try{
+    const n=await (await fetch('/net')).json();
+    state.net=n;renderNet();
+  }catch(e){}
+}, 3000);
+
+fetch('/state').then(r=>r.json()).then(d=>{
+  apply(d);renderHistory(d.history);
+}).catch(()=>showEmpty());
+</script>
+</body>
+</html>

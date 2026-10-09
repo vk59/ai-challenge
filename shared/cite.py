@@ -29,7 +29,20 @@ from llm import LLMError, ask
 
 # Порог отказа по близости. Выбран по замеру: середина зазора между
 # минимумом своих вопросов (0.402) и максимумом чужих (0.370).
-ABSTAIN_BELOW = 0.39
+#
+# День 27: у локальных эмбеддингов своя шкала, и переносить порог нельзя.
+# У bge-m3 свои вопросы начинаются с 0.558, чужие доходят до 0.516 —
+# зазор есть, но лежит совсем в другом месте. Поэтому порог выбирается
+# по бэкенду, а не берётся константой.
+ABSTAIN_BY_BACKEND = {"cloud": 0.39, "local": 0.54}
+ABSTAIN_BELOW = ABSTAIN_BY_BACKEND["cloud"]
+
+
+def порог_отказа(бэк: str | None = None) -> float:
+    """Порог для текущего бэкенда эмбеддингов."""
+    from embeddings import бэкенд
+
+    return ABSTAIN_BY_BACKEND.get(бэк or бэкенд(), ABSTAIN_BELOW)
 
 # Доля цитаты, которую достаточно найти дословно, чтобы счесть её
 # подтверждённой. Не 100%, потому что модель режет края по-своему:
@@ -257,7 +270,7 @@ def _parse(raw: str) -> dict | None:
 def answer_with_citations(
         question: str, *, index: Index | None = None,
         strategy: str = STRUCTURAL, k: int = 5,
-        abstain_below: float | None = ABSTAIN_BELOW,
+        abstain_below: float | None = -1.0,
         retrieval=None, max_tokens: int = 900,
         temperature: float = 0.1,
         system_prefix: str | None = None,
@@ -290,6 +303,11 @@ def answer_with_citations(
     question = (question or "").strip()
     if not question:
         raise CiteError("Пустой вопрос")
+
+    # -1.0 значит «не указано»: берём порог текущего бэкенда. Отличать
+    # от None приходится потому, что None — это осмысленное «без порога».
+    if abstain_below == -1.0:
+        abstain_below = порог_отказа()
 
     index = index or Index()
     if retrieval is not None:
@@ -423,4 +441,5 @@ def answer_with_citations(
 
 __all__ = ["answer_with_citations", "CitedAnswer", "Quote", "Source",
            "verify_quote", "normalize", "build_excerpts", "CiteError",
-           "ABSTAIN_BELOW", "QUOTE_MATCH_RATIO"]
+           "ABSTAIN_BELOW", "ABSTAIN_BY_BACKEND", "порог_отказа",
+           "QUOTE_MATCH_RATIO"]

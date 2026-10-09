@@ -25,10 +25,25 @@ from pathlib import Path
 
 from embeddings import embed, embed_one, в_байты, из_байтов, similarity
 
+from embeddings import бэкенд as бэкенд_эмбеддингов  # noqa: E402
 from memory import default_dir  # noqa: E402
 
+
+def база_для(бэк: str | None = None) -> "Path":
+    """Свой файл индекса на каждый бэкенд эмбеддингов.
+
+    Векторы разных моделей несравнимы — у облачной 1536 измерений,
+    у локальной 768. Класть их в одну таблицу значит получить поиск,
+    который молча возвращает мусор. Поэтому индексы раздельные и
+    переключаются той же переменной окружения, что и бэкенд.
+    """
+    бэк = бэк or бэкенд_эмбеддингов()
+    имя = "index.db" if бэк == "cloud" else f"index-{бэк}.db"
+    return default_dir() / имя
+
+
 # Тот же каталог, что у кэша эмбеддингов и истории диалогов.
-БАЗА = default_dir() / "index.db"
+БАЗА = база_для()
 
 FIXED, STRUCTURAL = "fixed", "structural"
 СТРАТЕГИИ = (FIXED, STRUCTURAL)
@@ -252,7 +267,9 @@ class Index:
     """Индекс в SQLite: метаданные и векторы рядом."""
 
     def __init__(self, path: Path | str | None = None):
-        self.path = Path(path) if path else БАЗА
+        # База вычисляется на создании, а не на импорте: переменную
+        # окружения ставят и после импорта модуля.
+        self.path = Path(path) if path else база_для()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._создать()
 

@@ -30,6 +30,40 @@ from llm import LLMError, load_env
 РАЗМЕРНОСТЬ = 1536
 АДРЕС = "https://openrouter.ai/api/v1/embeddings"
 
+# ── день 27: те же векторы, но на этой машине ────────────────────────
+# Пока эмбеддинги считает OpenRouter, разговор с «локальной» моделью
+# всё равно ходит в сеть: на каждый вопрос уходит один запрос за вектором.
+# Ollama умеет считать их сам, и тогда офлайн становится настоящим.
+# Взята bge-m3, а не nomic-embed-text, и это решение по замеру, а не
+# по вкусу. На паре «нужный кусок против чужого вопроса» nomic даёт
+# разрыв 0.107 (0.831 против 0.723) — он всему ставит высокую похожесть,
+# и порог отказа провести негде. bge-m3 даёт 0.278 (0.491 против 0.213),
+# и шкала похожа на облачную. Префиксы search_query/search_document,
+# которых требует nomic, положения не исправили: разрыв стал 0.100.
+LOCAL_МОДЕЛЬ = os.environ.get("AI_ADVENT_LOCAL_EMBED", "").strip() or "bge-m3"
+LOCAL_РАЗМЕРНОСТЬ = 1024
+LOCAL_АДРЕС = "http://127.0.0.1:11434/api/embed"
+
+# Что использовать по умолчанию. Переключается переменной окружения,
+# потому что индексы несовместимы: 1536 измерений против 768, и
+# сравнивать векторы разных моделей бессмысленно.
+BACKEND_VAR = "AI_ADVENT_EMBEDDINGS"
+
+
+def бэкенд() -> str:
+    """local | cloud. Выбор влияет и на модель, и на файл индекса."""
+    выбор = os.environ.get(BACKEND_VAR, "").strip().lower()
+    return "local" if выбор in ("local", "ollama", "offline") else "cloud"
+
+
+def модель_бэкенда(бэк: str | None = None) -> str:
+    return LOCAL_МОДЕЛЬ if (бэк or бэкенд()) == "local" else МОДЕЛЬ
+
+
+def размерность_бэкенда(бэк: str | None = None) -> int:
+    return (LOCAL_РАЗМЕРНОСТЬ if (бэк or бэкенд()) == "local"
+            else РАЗМЕРНОСТЬ)
+
 # Порог подобран опытом: по 64 куска запрос идёт около секунды, а тело
 # остаётся в разумных пределах. Больше — растёт риск словить таймаут
 # на всей пачке и потерять уже посчитанное.
@@ -114,7 +148,49 @@ def similarity(а: list[float], б: list[float]) -> float:
     return скаляр / норма if норма else 0.0
 
 
+def _запрос_локально(куски: list[str], модель: str
+                     ) -> tuple[list[list[float]], dict]:
+    """Векторы через Ollama. Формат ответа свой, не OpenAI-совместимый:
+    список лежит в "embeddings", а не в "data"."""
+    адрес = os.environ.get("OLLAMA_HOST", "").strip()
+    if адрес:
+        if not адрес.startswith("http"):
+            адрес = "http://" + адрес
+        адрес = адрес.rstrip("/") + "/api/embed"
+    else:
+        адрес = LOCAL_АДРЕС
+
+    тело = json.dumps({"model": модель, "input": куски}).encode("utf-8")
+    запрос = urllib.request.Request(адрес, тело,
+                                    {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(запрос, timeout=180) as ответ:
+            данные = json.load(ответ)
+    except urllib.error.HTTPError as сбой:
+        подробности = сбой.read()[:300].decode("utf-8", "replace")
+        raise EmbeddingError(
+            f"Ollama ответил {сбой.code}: {подробности}\n"
+            f"Модель не скачана? ollama pull {модель}") from сбой
+    except urllib.error.URLError as сбой:
+        raise EmbeddingError(
+            f"Ollama не отвечает на {адрес}: {сбой.reason}\n"
+            f"Запустите: ollama serve") from сбой
+
+    векторы = данные.get("embeddings") or []
+    if len(векторы) != len(куски):
+        raise EmbeddingError(
+            f"Просили {len(куски)} векторов, вернулось {len(векторы)}")
+    # Ollama не считает деньги, но токены сообщает — считаем их для
+    # единообразия, чтобы расход показывался той же строкой.
+    расход = {"prompt_tokens": int(данные.get("prompt_eval_count") or 0),
+              "total_tokens": int(данные.get("prompt_eval_count") or 0),
+              "cost": 0.0}
+    return векторы, расход
+
+
 def _запрос(куски: list[str], модель: str) -> tuple[list[list[float]], dict]:
+    if модель == LOCAL_МОДЕЛЬ:
+        return _запрос_локально(куски, модель)
     load_env()
     ключ_api = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not ключ_api:
@@ -147,7 +223,7 @@ def _запрос(куски: list[str], модель: str) -> tuple[list[list[f
     return [з["embedding"] for з in записи], данные.get("usage") or {}
 
 
-def embed(тексты: list[str], *, модель: str = МОДЕЛЬ,
+def embed(тексты: list[str], *, модель: str | None = None,
           кэш: bool = True, на_пачку=None) -> list[list[float]]:
     """Векторы для списка текстов. Порядок ответа совпадает с порядком входа.
 
@@ -157,6 +233,9 @@ def embed(тексты: list[str], *, модель: str = МОДЕЛЬ,
     """
     if not тексты:
         return []
+    модель = модель or модель_бэкенда()
+    пусто = [0.0] * (LOCAL_РАЗМЕРНОСТЬ if модель == LOCAL_МОДЕЛЬ
+                     else РАЗМЕРНОСТЬ)
 
     готово: dict[int, list[float]] = {}
     нужно: list[tuple[int, str, str]] = []     # позиция, текст, ключ
@@ -165,7 +244,7 @@ def embed(тексты: list[str], *, модель: str = МОДЕЛЬ,
     try:
         for позиция, текст in enumerate(тексты):
             if not (текст or "").strip():
-                готово[позиция] = [0.0] * РАЗМЕРНОСТЬ
+                готово[позиция] = list(пусто)
                 continue
             к = _ключ(текст, модель)
             если_есть = None

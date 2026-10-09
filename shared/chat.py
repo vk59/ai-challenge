@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-from cite import ABSTAIN_BELOW, CitedAnswer, answer_with_citations
+from cite import CitedAnswer, answer_with_citations, порог_отказа
 from index import STRUCTURAL, Index
 from llm import LLMError, ask
 from memory import DEFAULT_SESSION, Turn, default_dir, open_store
@@ -335,7 +335,7 @@ class ChatSession:
                  tasks: TaskStore | None = None,
                  strategy: str = STRUCTURAL, chunks: int = 5,
                  rerank: bool = True,
-                 abstain_below: float | None = ABSTAIN_BELOW,
+                 abstain_below: float | None = -1.0,
                  track_task: bool = True,
                  provider=None, model: str | None = None):
         self.session = session or DEFAULT_SESSION
@@ -345,7 +345,8 @@ class ChatSession:
         self.strategy = strategy
         self.chunks = chunks
         self.rerank = rerank
-        self.abstain_below = abstain_below
+        self.abstain_below = (порог_отказа() if abstain_below == -1.0
+                              else abstain_below)
         self.track_task = track_task
         # День 26: тот же чат целиком на локальной модели. Провайдер
         # прокидывается во все три обращения — раскрытие уточнения, ответ
