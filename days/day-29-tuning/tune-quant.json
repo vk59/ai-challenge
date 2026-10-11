@@ -1,0 +1,41 @@
+{
+  "runs": 2,
+  "summaries": [
+    {
+      "key": "q8",
+      "title": "квантование q8_0",
+      "runs": 20,
+      "right": 16,
+      "support": 2,
+      "sources_ok": 12,
+      "verified": 12,
+      "fabricated": 18,
+      "exact_share": 0.4,
+      "steady": 10,
+      "questions": 10,
+      "parse_failed": 0,
+      "median": 3.7472632709832396,
+      "p95": 8.535878084017895,
+      "spread": 2.1712515401065615,
+      "tokens": 46388
+    },
+    {
+      "key": "q5",
+      "title": "квантование q5_K_M",
+      "runs": 20,
+      "right": 14,
+      "support": 0,
+      "sources_ok": 12,
+      "verified": 10,
+      "fabricated": 18,
+      "exact_share": 0.35714285714285715,
+      "steady": 10,
+      "questions": 10,
+      "parse_failed": 0,
+      "median": 3.761108395498013,
+      "p95": 6.289557957963552,
+      "spread": 1.3340428602962457,
+      "tokens": 46174
+    }
+  ]
+}

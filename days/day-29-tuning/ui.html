@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Настройка 3B под задачу</title>
+<style>
+  :root{
+    --chrome:rgba(246,246,246,.72);--canvas:#fff;--text:#1d1d1f;--muted:#86868b;
+    --field:#fff;--border:rgba(0,0,0,.12);--hairline:rgba(0,0,0,.08);
+    --accent:#007aff;--code-bg:rgba(0,0,0,.05);--danger:#d70015;
+    --danger-bg:rgba(215,0,21,.10);--sidebar:rgba(240,240,242,.86);
+    --ok:#34c759;--warn:#ff9f0a;
+    --was:#86868b;--now:#34c759;--goal:#5e5ce6;
+    --desktop:linear-gradient(150deg,#8ea8d8 0%,#a99ad4 45%,#d3a2bd 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.30),0 2px 8px rgba(0,0,0,.14);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --chrome:rgba(58,58,60,.72);--canvas:#1e1e1e;--text:#f5f5f7;--muted:#98989d;
+    --field:#2c2c2e;--border:rgba(255,255,255,.14);--hairline:rgba(255,255,255,.10);
+    --accent:#0a84ff;--code-bg:rgba(255,255,255,.07);--danger:#ff6961;
+    --danger-bg:rgba(255,105,97,.14);--sidebar:rgba(36,36,38,.86);
+    --ok:#30d158;--warn:#ffb340;
+    --was:#98989d;--now:#30d158;--goal:#7d7aff;
+    --desktop:linear-gradient(150deg,#1b2434 0%,#2a2340 50%,#3a2436 100%);
+    --shadow:0 22px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;display:grid;place-items:center;padding:20px 14px;
+    background:var(--desktop);background-attachment:fixed;color:var(--text);
+    font:13.5px/1.5 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .window{width:min(100%,1340px);height:min(100%,850px);display:flex;
+    flex-direction:column;background:var(--canvas);border-radius:12px;
+    box-shadow:var(--shadow),0 0 0 .5px var(--border);overflow:hidden}
+  .titlebar{position:relative;flex:none;height:48px;display:flex;align-items:center;
+    gap:7px;padding:0 13px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .lights{display:flex;gap:8px;margin-right:auto}
+  .light{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12)}
+  .light.red{background:#ff5f57}.light.yellow{background:#febc2e}.light.green{background:#28c840}
+  .titles{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;pointer-events:none}
+  .titles b{display:block;font-size:13px;font-weight:600}
+  .titles span{display:block;font-size:11px;color:var(--muted)}
+  .btn{height:25px;padding:0 11px;font:inherit;font-size:12px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);border-radius:6px;
+    cursor:pointer;white-space:nowrap}
+  .btn.go{background:var(--accent);border-color:transparent;color:#fff}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  .body{flex:1;min-height:0;display:flex}
+  .aside{flex:none;width:226px;background:var(--sidebar);
+    border-right:.5px solid var(--hairline);display:flex;flex-direction:column;
+    overflow-y:auto}
+  .aside header{flex:none;padding:9px 11px 6px;font-size:11px;color:var(--muted);
+    font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .goalbox{margin:0 10px 9px;padding:8px 10px;border-radius:8px;
+    background:color-mix(in srgb,var(--goal) 13%,transparent);
+    border:.5px solid color-mix(in srgb,var(--goal) 38%,transparent);
+    font-size:11.5px}
+  .goalbox .ttl{font-size:10px;text-transform:uppercase;letter-spacing:.03em;
+    font-weight:700;color:var(--goal);margin-bottom:3px}
+  .goalbox table{width:100%;border-collapse:collapse;font-size:11px}
+  .goalbox td{padding:1px 0;color:var(--muted)}
+  .goalbox td+td{text-align:right;color:var(--text);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .vr{margin:0 10px 4px;padding:6px 9px;background:var(--field);
+    border:.5px solid var(--border);border-radius:7px;font-size:11px}
+  .vr .k{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-weight:700;
+    font-size:11.5px}
+  .vr .t{color:var(--text);margin-top:1px}
+  .vr .n{color:var(--muted);font-size:10.5px;margin-top:1px}
+  .qlist{padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
+  .qlist div{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11.5px;
+    border:.5px solid transparent;display:flex;gap:5px;align-items:baseline}
+  .qlist div:hover{background:var(--field);border-color:var(--border)}
+  .qlist div b{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
+  .qlist div span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .top{flex:none;padding:10px 14px;background:var(--chrome);
+    border-bottom:.5px solid var(--hairline)}
+  .row{display:flex;gap:7px;align-items:center}
+  .row input[type=search]{flex:1;font:inherit;font-size:13px;padding:7px 12px;
+    background:var(--field);border:.5px solid var(--border);border-radius:9px;
+    color:var(--text);outline:none;-webkit-appearance:none}
+  .row input[type=search]:focus{border-color:var(--accent)}
+  .tools{display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap}
+  .tools .sp{flex:1}
+  .tools select{font:inherit;font-size:12px;padding:4px 7px;
+    background:var(--field);border:.5px solid var(--border);border-radius:7px;
+    color:var(--text)}
+  .tools .note{font-size:11px;color:var(--muted)}
+
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:13px}
+  .cols{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;
+    align-items:start}
+  .col{background:var(--field);border:.5px solid var(--border);
+    border-radius:10px;overflow:hidden;border-top-width:3px}
+  .col.was{border-top-color:var(--was)}
+  .col.now{border-top-color:var(--now)}
+  .col.goal{border-top-color:var(--goal)}
+  .col>h4{margin:0;padding:7px 10px;font-size:12px;font-weight:700;
+    border-bottom:.5px solid var(--hairline)}
+  .col.was>h4{color:var(--was)}.col.now>h4{color:var(--now)}
+  .col.goal>h4{color:var(--goal)}
+  .col>h4 .sub{display:block;font-weight:400;font-size:10.5px;
+    color:var(--muted);margin-top:1px}
+  .col .tx{padding:9px 11px;font-size:12.5px;overflow-wrap:anywhere;
+    white-space:pre-wrap}
+  .col .marks{padding:0 11px 9px;display:flex;gap:5px;flex-wrap:wrap;
+    font-size:11px}
+  .col .marks span{padding:2px 7px;border-radius:10px;background:var(--code-bg)}
+  .col .marks .yes{background:rgba(52,199,89,.17);color:var(--ok);font-weight:600}
+  .col .marks .no{background:var(--danger-bg);color:var(--danger);font-weight:600}
+  .col .time{padding:0 11px 9px;font-size:10.5px;color:var(--muted);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+
+  table.t{width:100%;border-collapse:collapse;font-size:12px}
+  table.t th,table.t td{padding:4px 7px;text-align:left;
+    border-bottom:.5px solid var(--hairline)}
+  table.t th{font-size:10.5px;color:var(--muted);font-weight:600;
+    text-transform:uppercase;letter-spacing:.03em}
+  table.t td.num{text-align:right;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  table.t td.k{font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    font-weight:650}
+  table.t tr.win td{background:rgba(52,199,89,.10)}
+  table.t tr.win td.k{color:var(--ok)}
+  .good{color:var(--ok);font-weight:700}
+  .bad{color:var(--danger);font-weight:700}
+  .bars{margin-top:12px}
+  .bars h5{margin:0 0 5px;font-size:10.5px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.03em;font-weight:600}
+  .bar{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11.5px}
+  .bar .lab{flex:0 0 82px;font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    font-weight:650}
+  .bar .track{flex:1;height:14px;background:var(--code-bg);border-radius:7px;
+    overflow:hidden}
+  .bar .fill{height:100%;border-radius:7px;background:var(--accent)}
+  .bar.best .fill{background:var(--ok)}
+  .bar .val{flex:0 0 80px;text-align:right;
+    font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .verdict{margin-top:12px;padding:10px 13px;background:var(--code-bg);
+    border-radius:9px;font-size:12.5px;line-height:1.55}
+  .verdict b{font-weight:700}
+  .empty{margin:auto;text-align:center;max-width:500px;color:var(--muted)}
+  .empty .glyph{font-size:27px;opacity:.5}
+  .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
+  .empty p{margin:0;font-size:12.5px}
+  .err{background:var(--danger-bg);color:var(--danger);padding:8px 11px;
+    border-radius:8px;font-size:12px;margin-bottom:9px}
+  .waiting{display:flex;gap:7px;align-items:center;font-size:12px;
+    color:var(--muted);padding:5px 0}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+
+  .statusbar{flex:none;display:flex;gap:12px;flex-wrap:wrap;padding:6px 13px;
+    font-size:11px;color:var(--muted);background:var(--chrome);
+    border-top:.5px solid var(--hairline)}
+  .statusbar b{color:var(--text);font-weight:600}
+  .native body{display:block;padding:0;background:var(--canvas)}
+  .native .window{width:100%;height:100%;border-radius:0;box-shadow:none}
+  .native .titlebar{display:none}
+  @media (max-width:1150px){.cols{grid-template-columns:1fr}.aside{width:194px}}
+</style>
+</head>
+<body>
+
+<div class="window">
+  <header class="titlebar">
+    <div class="lights"><span class="light red"></span><span class="light yellow"></span><span class="light green"></span></div>
+    <div class="titles"><b>Настройка 3B под задачу</b><span id="subtitle">—</span></div>
+  </header>
+
+  <div class="body">
+    <nav class="aside">
+      <header>Цель</header>
+      <div id="goalbox"></div>
+      <header>Варианты</header>
+      <div id="variants"></div>
+      <header>Вопросы</header>
+      <div class="qlist" id="qlist"></div>
+    </nav>
+
+    <div class="main">
+      <div class="top">
+        <div class="row">
+          <input type="search" id="q" placeholder="Вопрос — ответят было, стало и цель">
+          <button class="btn go" id="ask">Сравнить</button>
+        </div>
+        <div class="tools">
+          <button class="btn" id="saved">Показать прогон</button>
+          <button class="btn" id="sweep">Прогнать заново</button>
+          <select id="runs">
+            <option value="1" selected>1 повтор</option>
+            <option value="2">2 повтора</option>
+          </select>
+          <span class="sp"></span>
+          <span class="note" id="note"></span>
+        </div>
+      </div>
+      <div class="pane" id="pane"></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>вариантов <b id="nv">—</b></span>
+    <span>вопросов <b id="nq">—</b></span>
+    <span>индекс <b id="ix">—</b></span>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">🔧</div>
+    <h2>Было, стало, цель</h2>
+    <p>Трёхмиллиардная модель в дне 28 давала 87% выдуманных цитат.
+       Задача — догнать семимиллиардную и остаться быстрее. Щёлкните
+       вопрос слева: три колонки покажут, что изменилось. «Показать
+       прогон» — готовые числа по всем вариантам.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const pane=$('#pane');
+let busy=false,state={};
+
+if(new URLSearchParams(location.search).has('native'))
+  document.documentElement.classList.add('native');
+
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;');
+const roleOf=key=>key==='base'?'was':(key==='final'?'now':'goal');
+const nameOf=key=>({base:'было',final:'стало','7b-base':'цель — 7B'}[key]||key);
+
+function showEmpty(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function showError(t){
+  const d=document.createElement('div');d.className='err';d.textContent=t;
+  pane.prepend(d);
+}
+function waiting(text){
+  const d=document.createElement('div');d.className='waiting';
+  d.innerHTML='<div class="dots"><i></i><i></i><i></i></div><span></span>';
+  d.querySelector('span').textContent=text;return d;
+}
+
+/* ── боковое ───────────────────────────────────────────────────── */
+function renderGoal(){
+  const t=state.targets||{};
+  let rows='';
+  for(const[name,v]of Object.entries(t))
+    rows+=`<tr><td>${esc(name)}</td><td>${v.right}/30 · ${v.verified} цит.</td></tr>`;
+  $('#goalbox').innerHTML='<div class="goalbox">'
+    +'<div class="ttl">догнать 7B, остаться быстрее</div>'
+    +'<table><tbody>'+rows+'</tbody></table></div>';
+}
+function renderVariants(){
+  const box=$('#variants');box.replaceChildren();
+  for(const v of state.variants||[]){
+    const d=document.createElement('div');d.className='vr';
+    d.innerHTML='<div class="k"></div><div class="t"></div><div class="n"></div>';
+    d.querySelector('.k').textContent=v.key;
+    d.querySelector('.t').textContent=v.title;
+    d.querySelector('.n').textContent=v.note;
+    box.append(d);
+  }
+}
+function renderQuestions(){
+  const box=$('#qlist');box.replaceChildren();
+  for(const q of state.questions||[]){
+    const d=document.createElement('div');
+    d.innerHTML='<b></b><span></span>';
+    d.querySelector('b').textContent=q.n+'.';
+    d.querySelector('span').textContent=q.q;
+    d.title=q.q+'\n\nждём: '+q.expect.join('; ');
+    d.onclick=()=>{$('#q').value=q.q;compare();};
+    box.append(d);
+  }
+}
+function apply(d){
+  if(!d)return;
+  state={...state,...d};
+  $('#nv').textContent=(state.variants||[]).length;
+  $('#nq').textContent=(state.questions||[]).length;
+  const ix=state.index||{};
+  $('#ix').textContent=(ix.chunks||0)+' кусков';
+  $('#subtitle').textContent='было → стало → цель';
+  renderGoal();renderVariants();renderQuestions();
+}
+
+/* ── один вопрос ───────────────────────────────────────────────── */
+function column(a){
+  const col=document.createElement('div');
+  col.className='col '+roleOf(a.key);
+  col.innerHTML='<h4><span class="n"></span><span class="sub"></span></h4>'
+    +'<div class="tx"></div><div class="marks"></div><div class="time"></div>';
+  col.querySelector('.n').textContent=nameOf(a.key);
+  col.querySelector('.sub').textContent=a.title+' · '+a.model;
+  col.querySelector('.tx').textContent=a.failed
+    ?('сбой: '+(a.why||'')):((a.answer||'(пусто)').trim());
+  const chip=(ok,text)=>`<span class="${ok?'yes':'no'}">${ok?'✓':'✗'} ${text}</span>`;
+  let html='';
+  if(a.checked){
+    html+=chip(a.right,'в ответе');
+    html+=chip(a.support,'в цитате');
+  }
+  const exact=a.cites?Math.round(100*a.verified/a.cites):0;
+  html+=chip(a.fabricated===0&&a.verified>0,
+    `цитат ${a.verified}${a.fabricated?(' (+'+a.fabricated+')'):''} · ${exact}% дословно`);
+  col.querySelector('.marks').innerHTML=html;
+  col.querySelector('.time').textContent=
+    (a.seconds||0).toFixed(2)+'с · '+(a.tokens||0)+' ток. · выдержек '+a.chunks;
+  return col;
+}
+
+async function compare(){
+  const question=$('#q').value.trim();
+  if(!question||busy){if(!question)$('#q').focus();return;}
+  busy=true;lock();
+  pane.replaceChildren();
+  const cols=document.createElement('div');cols.className='cols';
+  pane.append(cols);
+  const wait=waiting('три варианта по очереди…');pane.append(wait);
+  try{
+    const res=await fetch('/compare',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question,variants:state.showcase})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.answer)cols.append(column(m.answer));
+        if(m.done)wait.remove();
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+/* ── сводка ────────────────────────────────────────────────────── */
+function renderTable(list){
+  pane.replaceChildren();
+  const table=document.createElement('table');table.className='t';
+  table.innerHTML='<thead><tr><th>вариант</th><th>что меняли</th>'
+    +'<th class="num">в ответе</th><th class="num">в цитате</th>'
+    +'<th class="num">дословно</th><th class="num">медиана</th>'
+    +'<th class="num">p95</th></tr></thead><tbody></tbody>';
+  pane.append(table);
+  const body=table.querySelector('tbody');
+  const best=list.reduce((a,b)=>
+    ((b.support||0)>(a.support||0)||((b.support||0)===(a.support||0)
+      &&b.median<a.median))?b:a,list[0]);
+  for(const s of list){
+    const tr=document.createElement('tr');
+    if(s.key===best.key)tr.className='win';
+    const exact=Math.round((s.exact_share||0)*100);
+    tr.innerHTML='<td class="k"></td><td class="ti"></td>'
+      +`<td class="num">${s.right}/${s.runs}</td>`
+      +`<td class="num">${s.support}/${s.runs}</td>`
+      +`<td class="num ${exact===100?'good':(exact<50?'bad':'')}">${exact}%</td>`
+      +`<td class="num">${s.median.toFixed(2)}с</td>`
+      +`<td class="num">${s.p95.toFixed(2)}с</td>`;
+    tr.children[0].textContent=s.key;
+    tr.children[1].textContent=s.title||'';
+    body.append(tr);
+  }
+
+  const bars=document.createElement('div');bars.className='bars';
+  for(const[title,get,fmt,less]of[
+      ['цитаты с опорой на нужный факт',s=>s.support,
+       s=>s.support+'/'+s.runs,false],
+      ['доля дословных цитат',s=>(s.exact_share||0)*100,
+       s=>Math.round((s.exact_share||0)*100)+'%',false],
+      ['медиана ответа, меньше лучше',s=>s.median,
+       s=>s.median.toFixed(2)+'с',true]]){
+    const h=document.createElement('h5');h.textContent=title;bars.append(h);
+    const max=Math.max(...list.map(get))||1;
+    const bestVal=less?Math.min(...list.map(get)):Math.max(...list.map(get));
+    for(const s of list){
+      const d=document.createElement('div');
+      d.className='bar'+(get(s)===bestVal?' best':'');
+      d.innerHTML='<span class="lab"></span><span class="track">'
+        +'<i class="fill"></i></span><span class="val"></span>';
+      d.querySelector('.lab').textContent=s.key;
+      d.querySelector('.fill').style.width=
+        Math.max(2,Math.round(100*get(s)/max))+'%';
+      d.querySelector('.val').textContent=fmt(s);
+      bars.append(d);
+    }
+  }
+  pane.append(bars);
+
+  const final=list.find(s=>s.key==='final');
+  const goal=list.find(s=>s.key==='7b-base');
+  const was=list.find(s=>s.key==='base');
+  if(final&&goal&&was){
+    const d=document.createElement('div');d.className='verdict';
+    d.innerHTML=`Было <b>${was.right}/${was.runs}</b> верных и `
+      +`<b>${Math.round(was.exact_share*100)}%</b> дословных цитат. `
+      +`Стало <b>${final.right}/${final.runs}</b> и <b>100%</b>. `
+      +`У 7B — <b>${goal.right}/${goal.runs}</b> и `
+      +`<b>${Math.round(goal.exact_share*100)}%</b>. `
+      +`По опоре на нужный факт настроенная 3B даёт `
+      +`<b>${final.support}/${final.runs}</b> против ${goal.support}/${goal.runs} `
+      +`у 7B, и быстрее в `
+      +`<b>${(goal.median/final.median).toFixed(1)} раза</b>.`;
+    pane.append(d);
+  }
+}
+
+async function showSaved(){
+  const list=state.saved||[];
+  if(!list.length){showError('сохранённого прогона нет — нажмите «Прогнать заново»');return;}
+  renderTable(list);
+}
+
+async function runSweep(){
+  if(busy)return;
+  busy=true;lock();
+  pane.replaceChildren();
+  const wait=waiting('прогон идёт, это долго…');pane.append(wait);
+  const list=[];
+  try{
+    const res=await fetch('/sweep',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({runs:+$('#runs').value})});
+    const rd=res.body.getReader(),dec=new TextDecoder();let buf='';
+    for(;;){
+      const{value,done}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))!==-1){
+        const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+        if(!line)continue;
+        const m=JSON.parse(line);
+        if(m.error){showError(m.error);break;}
+        if(m.sweep_start)
+          wait.querySelector('span').textContent=
+            `${m.sweep_start.total} ответов: ${m.sweep_start.variants.length} вариантов…`;
+        if(m.summary){
+          list.push(m.summary);
+          wait.querySelector('span').textContent=
+            `готово ${list.length}: ${m.summary.key}…`;
+        }
+        if(m.sweep_done){wait.remove();renderTable(list);}
+        if(m.done)wait.remove();
+      }
+    }
+  }catch(e){showError(String(e.message||e));}
+  finally{wait.remove();busy=false;lock();}
+}
+
+function lock(){
+  for(const id of['ask','saved','sweep'])$('#'+id).disabled=busy;
+  $('#runs').disabled=busy;
+}
+$('#ask').addEventListener('click',compare);
+$('#q').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();compare();}});
+$('#saved').addEventListener('click',showSaved);
+$('#sweep').addEventListener('click',runSweep);
+
+fetch('/state').then(r=>r.json()).then(d=>{
+  apply(d);
+  $('#note').textContent=(d.saved||[]).length
+    ?('готовый прогон: '+d.saved.length+' вариантов')
+    :'готового прогона нет';
+  showEmpty();
+}).catch(()=>showEmpty());
+</script>
+</body>
+</html>

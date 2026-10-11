@@ -1,0 +1,43 @@
+{
+  "runs": 2,
+  "summaries": [
+    {
+      "key": "base",
+      "title": "как в дне 28",
+      "runs": 20,
+      "right": 14,
+      "support": 5,
+      "shown": 14,
+      "sources_ok": 9,
+      "verified": 8,
+      "fabricated": 15,
+      "exact_share": 0.34782608695652173,
+      "steady": 10,
+      "questions": 10,
+      "parse_failed": 0,
+      "median": 2.267317207995802,
+      "p95": 5.970667499990668,
+      "spread": 1.4533252869649873,
+      "tokens": 46751
+    },
+    {
+      "key": "final",
+      "title": "итоговый: указатель + требование назвать факт",
+      "runs": 20,
+      "right": 16,
+      "support": 10,
+      "shown": 16,
+      "sources_ok": 16,
+      "verified": 38,
+      "fabricated": 0,
+      "exact_share": 1.0,
+      "steady": 10,
+      "questions": 10,
+      "parse_failed": 0,
+      "median": 0.9458297915116418,
+      "p95": 1.5570552080171183,
+      "spread": 0.4628434943729626,
+      "tokens": 55038
+    }
+  ]
+}

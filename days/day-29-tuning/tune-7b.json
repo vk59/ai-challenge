@@ -1,0 +1,43 @@
+{
+  "runs": 2,
+  "summaries": [
+    {
+      "key": "7b-base",
+      "title": "7B для сравнения, как в дне 28",
+      "runs": 20,
+      "right": 16,
+      "support": 8,
+      "shown": 16,
+      "sources_ok": 14,
+      "verified": 10,
+      "fabricated": 10,
+      "exact_share": 0.5,
+      "steady": 10,
+      "questions": 10,
+      "parse_failed": 0,
+      "median": 4.330848708515987,
+      "p95": 7.303230375051498,
+      "spread": 2.3720795942100086,
+      "tokens": 44903
+    },
+    {
+      "key": "7b-final",
+      "title": "7B с итоговым промптом",
+      "runs": 20,
+      "right": 16,
+      "support": 4,
+      "shown": 16,
+      "sources_ok": 16,
+      "verified": 44,
+      "fabricated": 0,
+      "exact_share": 1.0,
+      "steady": 10,
+      "questions": 10,
+      "parse_failed": 0,
+      "median": 3.07229739552713,
+      "p95": 7.304433542012703,
+      "spread": 2.596082288953316,
+      "tokens": 54428
+    }
+  ]
+}

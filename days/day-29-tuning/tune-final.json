@@ -1,0 +1,43 @@
+{
+  "runs": 2,
+  "summaries": [
+    {
+      "key": "pointer3",
+      "title": "указывать строки, выдержек меньше",
+      "runs": 20,
+      "right": 12,
+      "support": 10,
+      "shown": 14,
+      "sources_ok": 16,
+      "verified": 44,
+      "fabricated": 0,
+      "exact_share": 1.0,
+      "steady": 10,
+      "questions": 10,
+      "parse_failed": 0,
+      "median": 0.9803652709815651,
+      "p95": 1.779134124983102,
+      "spread": 0.29894531716363465,
+      "tokens": 54262
+    },
+    {
+      "key": "final",
+      "title": "итоговый: указатель + требование назвать факт",
+      "runs": 20,
+      "right": 16,
+      "support": 10,
+      "shown": 16,
+      "sources_ok": 16,
+      "verified": 38,
+      "fabricated": 0,
+      "exact_share": 1.0,
+      "steady": 10,
+      "questions": 10,
+      "parse_failed": 0,
+      "median": 2.050836791517213,
+      "p95": 3.741211333021056,
+      "spread": 1.1823930060258447,
+      "tokens": 55038
+    }
+  ]
+}

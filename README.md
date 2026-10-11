@@ -62,6 +62,7 @@
 | 26 | Локальная LLM | [days/day-26-local-llm](days/day-26-local-llm) | ✅ код готов, нужно видео |
 | 27 | Интеграция локальной LLM | [days/day-27-offline](days/day-27-offline) | ✅ код готов, нужно видео |
 | 28 | Локальная LLM + RAG | [days/day-28-local-rag](days/day-28-local-rag) | ✅ код готов, нужно видео |
+| 29 | Оптимизация локальной LLM | [days/day-29-tuning](days/day-29-tuning) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 
