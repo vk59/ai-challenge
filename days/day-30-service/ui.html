@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1e1e1e">
+<title>Приватный чат</title>
+<style>
+  :root{
+    --bg:#f5f5f7;--panel:rgba(255,255,255,.86);--text:#1d1d1f;--muted:#86868b;
+    --field:#fff;--border:rgba(0,0,0,.12);--hairline:rgba(0,0,0,.08);
+    --accent:#007aff;--bubble:#e9e9eb;--code-bg:rgba(0,0,0,.05);
+    --ok:#34c759;--warn:#ff9f0a;--danger:#d70015;
+    --danger-bg:rgba(215,0,21,.10);
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#000;--panel:rgba(28,28,30,.88);--text:#f5f5f7;--muted:#98989d;
+    --field:#1c1c1e;--border:rgba(255,255,255,.14);--hairline:rgba(255,255,255,.10);
+    --accent:#0a84ff;--bubble:#2c2c2e;--code-bg:rgba(255,255,255,.07);
+    --ok:#30d158;--warn:#ffb340;--danger:#ff6961;
+    --danger-bg:rgba(255,105,97,.14);}}
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--text);
+    font:16px/1.45 -apple-system,"SF Pro Text",BlinkMacSystemFont,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;display:flex;flex-direction:column;
+    overscroll-behavior:none}
+
+  header.bar{flex:none;display:flex;align-items:center;gap:9px;
+    padding:calc(env(safe-area-inset-top) + 9px) 14px 9px;
+    background:var(--panel);backdrop-filter:saturate(180%) blur(18px);
+    border-bottom:.5px solid var(--hairline);position:sticky;top:0;z-index:5}
+  header.bar .dot{width:9px;height:9px;border-radius:50%;flex:none;
+    background:var(--muted)}
+  header.bar .dot.up{background:var(--ok)}
+  header.bar .dot.down{background:var(--danger)}
+  header.bar .who{min-width:0}
+  header.bar .who b{display:block;font-size:15px;font-weight:650;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  header.bar .who span{display:block;font-size:11.5px;color:var(--muted);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  header.bar button{margin-left:auto;flex:none;height:30px;padding:0 11px;
+    font:inherit;font-size:13px;color:var(--text);background:var(--field);
+    border:.5px solid var(--border);border-radius:8px;cursor:pointer}
+
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:13px;
+    display:flex;flex-direction:column;gap:9px;
+    -webkit-overflow-scrolling:touch}
+  .msg{display:flex;flex-direction:column}
+  .msg.me{align-items:flex-end}.msg.bot{align-items:flex-start}
+  .bubble{max-width:86%;padding:9px 14px;border-radius:19px;
+    overflow-wrap:anywhere;white-space:pre-wrap;font-size:15.5px}
+  .me .bubble{background:var(--accent);color:#fff;border-bottom-right-radius:6px}
+  .bot .bubble{background:var(--bubble);border-bottom-left-radius:6px}
+  .bot .bubble.err{background:var(--danger-bg);color:var(--danger)}
+  .bot .bubble.warn{background:rgba(255,159,10,.16)}
+  .meta{max-width:86%;font-size:11px;color:var(--muted);padding:0 10px;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .thinking{display:flex;gap:7px;align-items:center;font-size:13px;
+    color:var(--muted);padding:3px 10px}
+  .dots{display:flex;gap:4px}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--muted);
+    animation:bounce 1.25s ease-in-out infinite}
+  .dots i:nth-child(2){animation-delay:.16s}.dots i:nth-child(3){animation-delay:.32s}
+  @keyframes bounce{0%,60%,100%{opacity:.3}30%{opacity:1;transform:translateY(-3px)}}
+
+  .empty{margin:auto;text-align:center;max-width:380px;color:var(--muted);
+    padding:0 18px}
+  .empty .glyph{font-size:30px;opacity:.5}
+  .empty h2{margin:9px 0 5px;font-size:17px;font-weight:650;color:var(--text)}
+  .empty p{margin:0;font-size:14px}
+
+  footer.composer{flex:none;display:flex;align-items:flex-end;gap:8px;
+    padding:9px 12px calc(env(safe-area-inset-bottom) + 9px);
+    background:var(--panel);backdrop-filter:saturate(180%) blur(18px);
+    border-top:.5px solid var(--hairline)}
+  footer.composer textarea{flex:1;resize:none;max-height:118px;
+    padding:9px 14px;font:inherit;font-size:16px;color:var(--text);
+    background:var(--field);border:.5px solid var(--border);
+    border-radius:19px;outline:none}
+  footer.composer .send{flex:none;width:36px;height:36px;display:grid;
+    place-items:center;font-size:17px;color:#fff;background:var(--accent);
+    border:0;border-radius:50%;cursor:pointer}
+  footer.composer .send:disabled{background:var(--bubble);color:var(--muted)}
+
+  .sheet{position:fixed;inset:0;background:rgba(0,0,0,.42);display:none;
+    align-items:flex-end;z-index:20}
+  .sheet.on{display:flex}
+  .sheet .card{width:100%;max-height:82%;overflow-y:auto;
+    background:var(--bg);border-radius:18px 18px 0 0;
+    padding:16px 16px calc(env(safe-area-inset-bottom) + 16px)}
+  .sheet h3{margin:0 0 4px;font-size:17px}
+  .sheet p{margin:0 0 12px;font-size:13.5px;color:var(--muted)}
+  .sheet label{display:block;font-size:12px;color:var(--muted);
+    margin:10px 0 4px;text-transform:uppercase;letter-spacing:.03em;
+    font-weight:650}
+  .sheet input{width:100%;font:inherit;font-size:16px;padding:10px 13px;
+    background:var(--field);border:.5px solid var(--border);
+    border-radius:10px;color:var(--text);outline:none}
+  .sheet .row{display:flex;gap:8px;margin-top:14px}
+  .sheet .row button{flex:1;height:42px;font:inherit;font-size:15px;
+    border-radius:11px;border:.5px solid var(--border);
+    background:var(--field);color:var(--text);cursor:pointer}
+  .sheet .row button.go{background:var(--accent);color:#fff;
+    border-color:transparent;font-weight:600}
+  .facts{margin-top:14px;padding:10px 12px;background:var(--code-bg);
+    border-radius:10px;font-size:12.5px}
+  .facts table{width:100%;border-collapse:collapse}
+  .facts td{padding:2px 0;color:var(--muted)}
+  .facts td+td{text-align:right;color:var(--text);
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <span class="dot" id="dot"></span>
+  <span class="who"><b id="title">Приватный чат</b><span id="sub">проверяю связь…</span></span>
+  <button id="settings">Настройки</button>
+</header>
+
+<div class="pane" id="pane"></div>
+
+<footer class="composer">
+  <textarea id="msg" rows="1" placeholder="Спросите что-нибудь…"></textarea>
+  <button class="send" id="send" disabled title="Отправить">↑</button>
+</footer>
+
+<div class="sheet" id="sheet">
+  <div class="card">
+    <h3>Настройки</h3>
+    <p>Ключ хранится только в этом браузере и уходит в заголовке
+       Authorization. Сервис без ключа не отвечает.</p>
+    <label for="key">Ключ доступа</label>
+    <input id="key" type="password" placeholder="sk-local-…"
+           autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label for="base">Адрес сервиса</label>
+    <input id="base" type="url" placeholder="http://192.168.1.122:8080"
+           autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="facts" id="facts"></div>
+    <div class="row">
+      <button id="clear">Очистить чат</button>
+      <button id="save" class="go">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<template id="emptyTpl">
+  <div class="empty">
+    <div class="glyph">🔒</div>
+    <h2>Свой ИИ в своей сети</h2>
+    <p>Модель работает на домашней машине. Запросы не уходят в интернет,
+       а доступ закрыт ключом. Откройте «Настройки», вставьте ключ —
+       и спрашивайте.</p>
+  </div>
+</template>
+
+<script>
+const $=s=>document.querySelector(s);
+const pane=$('#pane'),msgEl=$('#msg'),sendEl=$('#send');
+let busy=false,history=[],limits={};
+
+const STORE='day30-service';
+function load(){
+  try{return JSON.parse(localStorage.getItem(STORE)||'{}');}catch(e){return {};}
+}
+function save(patch){
+  const next={...load(),...patch};
+  try{localStorage.setItem(STORE,JSON.stringify(next));}catch(e){}
+  return next;
+}
+const base=()=>(load().base||location.origin).replace(/\/+$/,'');
+const key=()=>load().key||'';
+
+const scroll=()=>pane.scrollTo({top:pane.scrollHeight,behavior:'smooth'});
+function showEmpty(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function addMsg(who,kind){
+  const e=pane.querySelector('.empty');if(e)e.remove();
+  const d=document.createElement('div');d.className='msg '+who;
+  d.innerHTML='<div class="bubble'+(kind?' '+kind:'')+'"></div>';
+  pane.append(d);return d.firstElementChild;
+}
+function addMeta(text){
+  const d=document.createElement('div');d.className='meta';
+  d.textContent=text;pane.append(d);return d;
+}
+function waiting(text){
+  const d=document.createElement('div');d.className='thinking';
+  d.innerHTML='<div class="dots"><i></i><i></i><i></i></div><span></span>';
+  d.querySelector('span').textContent=text;return d;
+}
+
+async function health(){
+  try{
+    const r=await fetch(base()+'/health',{cache:'no-store'});
+    const d=await r.json();
+    $('#dot').className='dot up';
+    $('#title').textContent=d.model||'Приватный чат';
+    $('#sub').textContent=(d.ollama?'модель на связи':'⚠ Ollama молчит')
+      +' · '+base().replace(/^https?:\/\//,'');
+    return d;
+  }catch(e){
+    $('#dot').className='dot down';
+    $('#sub').textContent='сервис недоступен: '+base().replace(/^https?:\/\//,'');
+    return null;
+  }
+}
+
+async function stats(){
+  if(!key())return null;
+  try{
+    const r=await fetch(base()+'/stats',
+      {headers:{Authorization:'Bearer '+key()},cache:'no-store'});
+    if(!r.ok)return null;
+    const d=await r.json();
+    limits=d.limits||{};
+    return d;
+  }catch(e){return null;}
+}
+
+function renderFacts(d){
+  const box=$('#facts');
+  if(!d){box.innerHTML='<div style="color:var(--muted)">'
+    +'статистика откроется после сохранения ключа</div>';return;}
+  const l=d.limits||{},r=d.rejected||{},n=d.now||{};
+  box.innerHTML='<table><tbody>'
+    +`<tr><td>запросов</td><td>${d.total} (готово ${d.done})</td></tr>`
+    +`<tr><td>медиана / p95</td><td>${d.median}с / ${d.p95}с</td></tr>`
+    +`<tr><td>в очереди сейчас</td><td>${n.queued} (работает ${n.running})</td></tr>`
+    +`<tr><td>очередь доходила до</td><td>${d.max_queue_seen}</td></tr>`
+    +`<tr><td>отказов</td><td>ключ ${r.auth}, лимит ${r.rate}, размер ${r.size}, занят ${r.busy}</td></tr>`
+    +`<tr><td>лимит</td><td>${l.rate_per_minute}/мин, ${l.max_concurrent} разом</td></tr>`
+    +`<tr><td>промпт до</td><td>${l.max_prompt_chars} знаков</td></tr>`
+    +'</tbody></table>';
+}
+
+async function send(){
+  const text=msgEl.value.trim();
+  if(!text||busy)return;
+  if(!key()){openSheet();return;}
+  busy=true;msgEl.value='';grow();sync();
+  addMsg('me').textContent=text;
+  history.push({role:'user',content:text});
+  const wait=waiting('думает…');pane.append(wait);scroll();
+  const started=Date.now();
+  try{
+    const r=await fetch(base()+'/v1/chat/completions',{
+      method:'POST',
+      headers:{'Content-Type':'application/json',
+               Authorization:'Bearer '+key()},
+      body:JSON.stringify({messages:history.slice(-12),max_tokens:600})});
+    const d=await r.json();
+    wait.remove();
+    if(!r.ok){
+      const code=(d.error||{}).code||r.status;
+      const kind=(r.status===429||r.status===503)?'warn':'err';
+      addMsg('bot',kind).textContent=(d.error||{}).message||('ошибка '+r.status);
+      const after=r.headers.get('Retry-After');
+      addMeta(`${r.status} ${code}`+(after?` · повторить через ${after}с`:''));
+      // Неудачную реплику из истории убираем: иначе она уедет
+      // в следующий запрос и будет мешать.
+      history.pop();
+    }else{
+      const answer=((d.choices||[])[0]||{}).message||{};
+      addMsg('bot').textContent=(answer.content||'(пусто)').trim();
+      history.push({role:'assistant',content:answer.content||''});
+      const x=d.x_service||{},u=d.usage||{};
+      addMeta(`${x.seconds??((Date.now()-started)/1000).toFixed(1)}с · `
+        +`${u.total_tokens||0} ток. · ${x.used_this_minute||0}/`
+        +`${x.rate_per_minute||'?'} за минуту`);
+    }
+    scroll();
+  }catch(e){
+    wait.remove();
+    addMsg('bot','err').textContent='Сервис недоступен: '+(e.message||e);
+    history.pop();
+  }finally{wait.remove();busy=false;sync();scroll();}
+}
+
+function sync(){sendEl.disabled=busy||!msgEl.value.trim();}
+function grow(){msgEl.style.height='auto';
+  msgEl.style.height=msgEl.scrollHeight+'px';}
+
+async function openSheet(){
+  const saved=load();
+  $('#key').value=saved.key||'';
+  $('#base').value=saved.base||location.origin;
+  renderFacts(await stats());
+  $('#sheet').classList.add('on');
+}
+$('#settings').addEventListener('click',openSheet);
+$('#sheet').addEventListener('click',e=>{
+  if(e.target.id==='sheet')$('#sheet').classList.remove('on');});
+$('#save').addEventListener('click',async()=>{
+  save({key:$('#key').value.trim(),
+        base:$('#base').value.trim().replace(/\/+$/,'')});
+  $('#sheet').classList.remove('on');
+  await health();
+});
+$('#clear').addEventListener('click',()=>{
+  history=[];showEmpty();$('#sheet').classList.remove('on');});
+
+msgEl.addEventListener('input',()=>{grow();sync();});
+msgEl.addEventListener('keydown',e=>{
+  // На телефоне Enter — это перенос строки, отправка кнопкой.
+  if(e.key==='Enter'&&!e.shiftKey&&window.innerWidth>760){
+    e.preventDefault();send();}});
+sendEl.addEventListener('click',send);
+
+showEmpty();
+health();
+setInterval(health, 15000);
+</script>
+</body>
+</html>
