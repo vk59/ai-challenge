@@ -64,6 +64,7 @@
     font-weight:700;color:var(--git);margin-bottom:3px}
   .live pre{margin:0;font:11px/1.45 ui-monospace,"SF Mono",Menlo,monospace;
     white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
+  .aside .card pre{max-height:168px;overflow:auto}
   .qlist{padding:0 8px 8px;display:flex;flex-direction:column;gap:2px}
   .qlist div{padding:5px 8px;border-radius:6px;cursor:pointer;font-size:11.5px;
     border:.5px solid transparent;display:flex;gap:5px;align-items:baseline}
@@ -114,6 +115,17 @@
   .empty .glyph{font-size:27px;opacity:.5}
   .empty h2{margin:8px 0 4px;font-size:16px;font-weight:600;color:var(--text)}
   .empty p{margin:0;font-size:12.5px}
+  .empty .qpick{margin-top:16px;display:flex;flex-direction:column;gap:6px;text-align:left}
+  .empty .qpick button{display:flex;align-items:center;gap:8px;width:100%;
+    padding:8px 11px;border:1px solid var(--border);border-radius:9px;
+    background:var(--card);font:inherit;font-size:12.5px;color:var(--text);
+    cursor:pointer;text-align:left}
+  .empty .qpick button:hover{background:var(--field);border-color:var(--accent)}
+  .empty .qpick .k{flex:none;font-size:9.5px;padding:1px 6px;border-radius:7px;
+    font-weight:600;letter-spacing:.02em}
+  .empty .qpick .k.state{background:rgba(255,159,10,.20);color:var(--git)}
+  .empty .qpick .k.docs{background:rgba(94,92,230,.18);color:var(--docs)}
+  .empty .qpick .k.both{background:rgba(52,199,89,.18);color:var(--ok)}
   .composer{flex:none;display:flex;align-items:flex-end;gap:8px;padding:9px 12px;
     background:var(--chrome);border-top:.5px solid var(--hairline)}
   .composer .slash{flex:none;font-size:12px;color:var(--muted);
@@ -208,6 +220,7 @@
        «почему сжатие бывает дороже» — в документацию. Под каждым ответом
        видно, откуда он взят: оранжевым инструменты git, сиреневым
        выдержки из документов.</p>
+    <div class="qpick" id="qpick"></div>
   </div>
 </template>
 
@@ -224,7 +237,22 @@ const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 const num=n=>(n??0).toLocaleString('ru');
 const scroll=()=>pane.scrollTo({top:pane.scrollHeight,behavior:'smooth'});
 
-function showEmpty(){pane.replaceChildren($('#emptyTpl').content.cloneNode(true));}
+function showEmpty(){
+  pane.replaceChildren($('#emptyTpl').content.cloneNode(true));
+  fillPicks();
+}
+function fillPicks(){
+  const box=$('#qpick');if(!box)return;
+  box.replaceChildren();
+  for(const q of state.questions||[]){
+    const b=document.createElement('button');
+    b.innerHTML='<span class="k"></span><span></span>';
+    const k=b.querySelector('.k');k.className='k '+q.kind;k.textContent=q.kind;
+    b.querySelector('span:last-child').textContent=q.q;
+    b.onclick=()=>{msgEl.value=q.q;grow();sync();send();};
+    box.append(b);
+  }
+}
 function addMsg(who,kind){
   const e=pane.querySelector('.empty');if(e)e.remove();
   const d=document.createElement('div');d.className='msg '+who;
@@ -289,7 +317,7 @@ function apply(d){
   $('#ix').textContent=num(ix.chunks)+' кусков';
   $('#mcp').textContent=state.mcp||'—';
   $('#subtitle').textContent='документы + git через MCP';
-  renderQuestions();renderTools();
+  renderQuestions();renderTools();fillPicks();
 }
 
 /* ── ответ ─────────────────────────────────────────────────────── */
