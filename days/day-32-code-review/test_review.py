@@ -217,6 +217,7 @@ class BuildReviewTests(GitRepository):
 
         self.assertIs(llm_module.ask.call_args.kwargs['provider'], llm_module.DEEPSEEK)
         self.assertEqual(llm_module.ask.call_args.kwargs['model'], 'deepseek-chat')
+        self.assertEqual(llm_module.ask.call_args.kwargs['max_tokens'], 4000)
         prompt = llm_module.ask.call_args.args[0]
         self.assertIn("return 1", prompt)
         self.assertIn("return 2", prompt)
