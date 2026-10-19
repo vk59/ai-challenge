@@ -19,9 +19,9 @@ SHARED = Path(__file__).resolve().parents[2] / "shared"
 if str(SHARED) not in sys.path:
     sys.path.insert(0, str(SHARED))
 
-MAX_DIFF_CHARS = 50_000
+MAX_DIFF_CHARS = 100_000
 MAX_FILE_CHARS = 20_000
-MAX_TOTAL_FILE_CHARS = 50_000
+MAX_TOTAL_FILE_CHARS = 100_000
 MAX_QUERY_CHARS = 15_000
 REVIEW_HEADINGS = (
     "## Потенциальные баги",
@@ -93,7 +93,7 @@ def collect_changes(repo: Path, base_ref: str, head_ref: str) -> tuple[str, list
         if patch:
             patches.append(patch)
             if sum(map(len, patches)) > MAX_DIFF_CHARS:
-                raise ReviewError("Diff слишком большой для безопасного ревью (лимит 50 000 символов)")
+                raise ReviewError("Diff слишком большой для безопасного ревью (лимит 100 000 символов)")
 
     return "\n".join(patches), paths, contents
 
