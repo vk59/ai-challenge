@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TaskFlow · Поддержка</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f5f2;color:#212523;font:15px/1.6 system-ui,sans-serif}button,textarea,select{font:inherit}header{padding:22px 5vw;border-bottom:1px solid #dfe2da;display:flex;align-items:center;justify-content:space-between;background:#fff}.brand{font-weight:750;letter-spacing:-.5px;font-size:22px}.brand span{color:#65846b}header small{font-size:12px;color:#69736a}.shell{max-width:1180px;margin:38px auto;display:grid;grid-template-columns:290px 1fr;gap:28px;padding:0 24px}aside,main{background:#fff;border:1px solid #dfe2da;border-radius:14px}aside{padding:24px;height:fit-content}h1{font-size:28px;line-height:1.2;letter-spacing:-.8px;margin:0 0 12px}h2{font-size:15px;margin:0 0 12px}p{margin:8px 0 16px}.subtle{color:#737c74;font-size:13px}.label{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#72816f;font-weight:700;margin:22px 0 8px}select{width:100%;border:1px solid #d9dfd6;border-radius:8px;padding:10px;background:#fafbf8;font-size:13px}.badge{display:inline-block;border-radius:6px;padding:4px 9px;background:#edf3e9;color:#44623e;font-size:12px}.badge.demo{background:#fff0d7;color:#8d5f13}main{padding:32px}.question{border:1px solid #dce2d7;border-radius:10px;padding:14px;margin:24px 0}textarea{display:block;width:100%;min-height:90px;resize:vertical;border:0;outline:0;color:#212523;background:transparent}.controls{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}button{background:#42624a;color:#fff;border:0;border-radius:8px;padding:10px 18px;cursor:pointer;font-weight:600}button:disabled{opacity:.5;cursor:wait}#status{font-size:12px;color:#72816f}.reply{white-space:pre-wrap;line-height:1.75}#result{border-top:1px solid #e3e6df;padding-top:24px}.eyebrow{font-size:11px;letter-spacing:1.5px;font-weight:700;color:#688467}.source{border:1px solid #e3e6df;border-radius:8px;margin-top:10px;padding:12px;font-size:13px}.source summary{cursor:pointer;color:#46644a;font-weight:600}.source p{white-space:pre-wrap;color:#647064;font-size:12px;margin:10px 0 0}.error{background:#fff0ed;color:#a43e2c;padding:16px;border-radius:8px}.facts{font-size:13px;padding:12px;border-radius:8px;background:#f4f6f0;white-space:pre-wrap}a{color:#42624a}footer{font-size:11px;color:#90988f;padding:20px 0 0}@media(max-width:760px){.shell{grid-template-columns:1fr;margin-top:20px;gap:16px}main{padding:22px}aside{padding:20px}header{padding:18px 24px}h1{font-size:24px}}
+</style>
+<header><div class="brand">Task<span>Flow</span> <small>/ поддержка</small></div><span id="mode" class="badge">Подключение…</span></header>
+<div class="shell">
+<aside>
+  <h2>Контекст обращения</h2><p class="subtle">Выберите учебный тикет. Ассистент проверит его через MCP перед ответом.</p>
+  <label for="ticket" class="label">Пользователь и тикет</label>
+  <select id="ticket">
+    <option value="U-100|T-100">Алексей · T-100 · SSO</option>
+    <option value="U-200|T-200">Мария · T-200 · Блокировка</option>
+    <option value="U-300|T-300">Ирина · T-300 · Регистрация</option>
+    <option value="U-200|">Мария · без тикета · Pro</option>
+    <option value="U-300|">Ирина · без тикета · Free</option>
+  </select>
+  <div class="label">Данные из MCP</div><div id="context" class="facts">Появятся после первого вопроса.</div>
+  <div class="label">Источники знаний</div><p class="subtle">FAQ, вход, тарифы и оплата.<br>Документация и данные тикета показаны отдельно.</p>
+  <footer>Демонстрационные пользователи и тикеты. Только чтение, без изменений аккаунта.</footer>
+</aside>
+<main>
+  <div class="eyebrow">ДЕНЬ 33 · AI-АССИСТЕНТ</div>
+  <h1>Помощь с учётом вашей ситуации</h1><p class="subtle">Ответ по документации продукта и фактам выбранного обращения.</p>
+  <form id="form" class="question"><textarea id="question" aria-label="Вопрос" maxlength="2000" required>Почему не работает авторизация?</textarea><div class="controls"><span id="status">Один вопрос — разные причины в разных тикетах</span><button id="send">Получить ответ →</button></div></form>
+  <section id="result" hidden><div class="eyebrow">ОТВЕТ ПОДДЕРЖКИ</div><p id="answer" class="reply"></p><div id="sources"></div></section>
+  <div id="error" class="error" role="alert" hidden></div>
+  <footer>Ассистент не сбрасывает пароли, не отправляет письма и не закрывает тикеты.</footer>
+</main></div>
+<script>
+const byId=id=>document.getElementById(id);
+fetch('/health').then(r=>r.json()).then(data=>{const demo=data.mode==='demo';byId('mode').textContent=demo?'Демо · извлечение без LLM':'AI · OpenRouter + RAG';byId('mode').classList.toggle('demo',demo)}).catch(()=>{byId('mode').textContent='Сервис недоступен'});
+byId('ticket').onchange=()=>{byId('result').hidden=true;byId('context').textContent='Контекст будет перечитан при следующем вопросе.';byId('error').hidden=true};
+byId('form').onsubmit=async event=>{
+  event.preventDefault();const question=byId('question').value.trim();if(!question)return;
+  const [user_id,ticket_id]=byId('ticket').value.split('|');
+  byId('send').disabled=true;byId('ticket').disabled=true;byId('error').hidden=true;byId('result').hidden=true;
+  byId('status').textContent='Читаю MCP-контекст → ищу документы → готовлю ответ…';
+  try{
+    const response=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question,user_id,...(ticket_id?{ticket_id}:{})})});
+    const data=await response.json();if(!response.ok)throw new Error(data.error?.message||'Запрос не выполнен');
+    byId('answer').textContent=data.answer;const u=data.context.user,t=data.context.ticket;
+    byId('context').textContent=`${u.name} · ${u.id}\nТариф: ${u.plan}\nВход: ${u.auth_method}\nСостояние: ${u.account_status}`+(t?`\n\n${t.id} · ${t.status}\n${t.error_code}`:'\n\nТикет не выбран');
+    byId('sources').replaceChildren();data.sources.forEach((source,i)=>{const detail=document.createElement('details');detail.className='source';const summary=document.createElement('summary');summary.textContent=`[${i+1}] ${source.source} · ${source.section}`;const text=document.createElement('p');text.textContent=source.text;detail.append(summary,text);byId('sources').append(detail)});
+    byId('result').hidden=false;byId('status').textContent=`MCP: ${data.tools.map(t=>t.name).join(', ')} · ${data.seconds} с`;
+  }catch(error){byId('error').textContent=error.message;byId('error').hidden=false;byId('status').textContent='Исправьте запрос или повторите позже'}
+  finally{byId('send').disabled=false;byId('ticket').disabled=false}
+};
+</script>
+</html>

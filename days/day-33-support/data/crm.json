@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "users": [
+    {"id": "U-100", "name": "Алексей (демо)", "plan": "Business", "auth_method": "sso", "account_status": "active", "email_verified": true},
+    {"id": "U-200", "name": "Мария (демо)", "plan": "Pro", "auth_method": "password", "account_status": "temporarily_locked", "email_verified": true},
+    {"id": "U-300", "name": "Ирина (демо)", "plan": "Free", "auth_method": "password", "account_status": "pending_verification", "email_verified": false}
+  ],
+  "tickets": [
+    {"id": "T-100", "user_id": "U-100", "status": "open", "subject": "Не получается войти по паролю", "description": "После включения корпоративного SSO обычная форма входа возвращает ошибку.", "error_code": "SSO_REQUIRED"},
+    {"id": "T-200", "user_id": "U-200", "status": "open", "subject": "Вход временно заблокирован", "description": "Пять неудачных попыток входа. Интерфейс показывает временную блокировку.", "error_code": "ACCOUNT_LOCKED"},
+    {"id": "T-300", "user_id": "U-300", "status": "open", "subject": "Не могу завершить регистрацию", "description": "Письмо подтверждения ещё не открыто, приложение не пускает в рабочее пространство.", "error_code": "EMAIL_UNVERIFIED"}
+  ]
+}

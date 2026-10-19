@@ -1,0 +1,60 @@
+name: Day 33 support assistant
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - 'days/day-33-support/**'
+      - 'shared/mcp.py'
+      - 'shared/index.py'
+      - 'shared/embeddings.py'
+      - 'shared/llm.py'
+      - '.github/workflows/day-33-support.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: day33-support-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline MCP, support and HTTP tests
+        run: python3 -m unittest discover -s days/day-33-support -p 'test_*.py' -v
+      - name: Demo end-to-end smoke
+        run: python3 days/day-33-support/smoke.py
+  cloud-smoke:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Real HTTP, MCP, embeddings and LLM
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DAY33_MODEL: ${{ vars.DAY33_MODEL || 'deepseek/deepseek-chat' }}
+          AI_ADVENT_SUPPORT_CACHE: ${{ runner.temp }}/day33-cache
+        run: python3 days/day-33-support/smoke.py --live --output "$RUNNER_TEMP/day33-smoke.json"
+      - name: Save synthetic answers and source evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: day33-support-smoke
+          path: ${{ runner.temp }}/day33-smoke.json
+          if-no-files-found: ignore
