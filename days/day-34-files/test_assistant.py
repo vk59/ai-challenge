@@ -102,6 +102,23 @@ class AgentTests(unittest.TestCase):
             FileAssistant(self.root).run("Обнови документацию", apply=True)
         self.assertEqual(caught.exception.code, "no_changes_prepared")
 
+    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch("assistant.llm.ask")
+    def test_model_is_sent_back_when_report_omits_a_search_match(self, ask):
+        ask.side_effect = [
+            response([('search_text', {'query': 'login'}),
+                      *(('read_file', {'path': p}) for p in ('src/auth.py', 'src/web.py', 'docs/auth.md')),
+                      ('propose_file', {'path': 'reports/uses.md', 'content': 'src/auth.py src/web.py'})]),
+            response(text='Готово'),
+            response([('read_file', {'path': 'src/cli.py'}),
+                      ('propose_file', {'path': 'reports/uses.md', 'content': 'src/auth.py src/web.py src/cli.py'})]),
+            response(text='Готово, все найденные файлы учтены'),
+        ]
+        result = FileAssistant(self.root).run('Найди все использования login и создай отчёт', apply=True)
+        self.assertIn('src/cli.py', (self.root / 'reports/uses.md').read_text())
+        self.assertEqual(len(result['files_read']), 4)
+        self.assertEqual(ask.call_count, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

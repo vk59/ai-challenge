@@ -19,6 +19,9 @@ ROLE = """Ты файловый ассистент проекта. Пользо�
 Работай через MCP: начни с list_files, ищи релевантный текст, читай файлы.
 Прочитай минимум 3 разных файла. Для поиска использований API обязательно выполни
 search_text, прочитай исходники и создай Markdown-отчёт в reports/ с файлами и строками.
+Поиск буквальный: ищи имя символа, например login, а не фразу «API login».
+Если совпадений нет, сократи запрос. Прочитай каждый файл из найденных совпадений
+и включи каждый такой путь в отчёт. Не пропускай CLI, импорты и другие точки входа.
 Если поиск truncated или skipped > 0, явно отметь неполноту результата.
 Для обновления документации сначала прочитай код и существующую документацию,
 затем propose_file передай полный обновлённый текст. Сохрани остальные разделы.
@@ -66,6 +69,7 @@ class FileAssistant:
         trace, files_read = [], set()
         context_chars, proposals = 0, 0
         applying = False
+        last_search, proposed_contents = None, {}
         command = [sys.executable, str(HERE / "server.py"), "--project", str(self.project)]
         if apply:
             command.append("--allow-apply")
@@ -78,7 +82,7 @@ class FileAssistant:
                 allowed = {tool["function"]["name"] for tool in schemas}
 
                 def invoke(name, arguments, internal=False):
-                    nonlocal context_chars, proposals
+                    nonlocal context_chars, proposals, last_search
                     if len(trace) >= 30 and not internal:
                         raise AgentError("step_limit", "Превышен лимит 30 вызовов инструментов.")
                     try:
@@ -101,6 +105,9 @@ class FileAssistant:
                         files_read.add(data["path"])
                     if name == "propose_file":
                         proposals += 1
+                        proposed_contents[arguments["path"]] = arguments["content"]
+                    if name == "search_text":
+                        last_search = data
                     if not internal:
                         context_chars += len(json.dumps(data, ensure_ascii=False))
                     if context_chars > 160_000:
@@ -118,6 +125,19 @@ class FileAssistant:
                                         model=os.environ.get("DAY34_MODEL", "").strip() or "deepseek/deepseek-chat",
                                         max_tokens=2600, temperature=0.0)
                         if not reply.tool_calls:
+                            if last_search is not None:
+                                matched = {m["path"] for m in last_search["matches"]}
+                                report = "\n".join(text for path, text in proposed_contents.items()
+                                                   if path.startswith("reports/"))
+                                missing = matched - files_read
+                                omitted = {path for path in matched if report and path not in report}
+                                if not matched or missing or omitted:
+                                    feedback = ("Проверка полноты не пройдена. " +
+                                        ("Буквальный поиск вернул 0 совпадений: повтори поиск по одному имени символа. " if not matched else "") +
+                                        (f"Прочитай найденные файлы: {sorted(missing)}. " if missing else "") +
+                                        (f"Добавь в отчёт пропущенные пути: {sorted(omitted)}. " if omitted else ""))
+                                    conversation.append({"role": "user", "content": feedback})
+                                    continue
                             summary = (reply.text or "").strip()
                             break
                         conversation.append({"role": "assistant", "content": reply.text or None,

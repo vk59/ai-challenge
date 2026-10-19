@@ -15,7 +15,7 @@ def tool(name, description, properties=None, required=None):
 STRING = {"type": "string"}
 TOOLS = [
     tool("list_files", "Discover readable project paths; generated reports are excluded."),
-    tool("search_text", "Search literal text across project files. Returns file/line; inspect truncated/skipped.",
+    tool("search_text", "Literal substring search: use a symbol such as login, not prose like API login. Retry a shorter query for zero matches. Inspect truncated/skipped.",
          {"query": STRING}, ["query"]),
     tool("read_file", "Read a UTF-8 file and remember its version before editing.", {"path": STRING}, ["path"]),
     tool("propose_file", "Stage Markdown creation/update without saving. Existing file must be read first.",
