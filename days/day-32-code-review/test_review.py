@@ -191,27 +191,12 @@ class BuildReviewTests(GitRepository):
         self.write("src/app.py", "def value():\n    return 2\n")
         head = self.commit("head")
 
-        class FakeIndex:
-            observed_query = ""
-
-            def __init__(self, path):
-                self.path = path
-
-            def rebuild(self, documents, strategy):
-                self.documents = documents
-
-            def search(self, query, strategy, k):
-                FakeIndex.observed_query = query
-                chunk = SimpleNamespace(
-                    source="README.md", section="Architecture", text="Base RAG context"
-                )
-                return [(chunk, 0.9)]
-
-        index_module = types.ModuleType("index")
-        index_module.Index = FakeIndex
-        index_module.STRUCTURAL = "structural"
+        chunk = SimpleNamespace(source="README.md", section="Architecture", text="Base RAG context")
+        retrieve_mock = Mock(return_value=[(chunk, 0.9)])
+        retrieval_module = types.ModuleType("retrieval")
+        retrieval_module.retrieve = retrieve_mock
         llm_module = types.ModuleType("llm")
-        llm_module.OPENROUTER = object()
+        llm_module.DEEPSEEK = object()
         llm_module.load_env = Mock()
         llm_module.ask = Mock(return_value=SimpleNamespace(text="""## Потенциальные баги
 Нет подтверждённых багов.
@@ -226,16 +211,34 @@ class BuildReviewTests(GitRepository):
         )]
 
         with patch("review.collect_documents", return_value=docs), patch.dict(
-            sys.modules, {"index": index_module, "llm": llm_module}
-        ), patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
+            sys.modules, {"retrieval": retrieval_module, "llm": llm_module}
+        ), patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key", "DAY32_DEEPSEEK_MODEL": ""}):
             report = build_review(self.repo, base, head)
 
+        self.assertIs(llm_module.ask.call_args.kwargs['provider'], llm_module.DEEPSEEK)
+        self.assertEqual(llm_module.ask.call_args.kwargs['model'], 'deepseek-chat')
         prompt = llm_module.ask.call_args.args[0]
         self.assertIn("return 1", prompt)
         self.assertIn("return 2", prompt)
         self.assertIn("Base RAG context", prompt)
-        self.assertIn("src/app.py", FakeIndex.observed_query)
+        self.assertIn("src/app.py", retrieve_mock.call_args.args[1])
         self.assertIn("## Рекомендации", report)
+
+
+class LocalRetrievalTests(unittest.TestCase):
+    def test_real_bm25_retrieves_docs_and_code_without_embedding_api(self):
+        from index import Document
+        from retrieval import retrieve
+        docs = [Document('docs/auth.md', 'Auth', 'markdown', '# Authentication\nlogin requires mfa_code'),
+                Document('src/auth.py', 'Auth', 'python', 'def login(mfa_code):\n    return True'),
+                Document('docs/billing.md', 'Billing', 'markdown', '# Billing\nInvoices and prices')]
+        with patch('embeddings.embed', side_effect=AssertionError('No embedding service')), \
+             patch('embeddings.embed_one', side_effect=AssertionError('No embedding service')):
+            results = retrieve(docs, 'login mfa_code', k=5)
+        self.assertEqual({chunk.source for chunk, _ in results}, {'docs/auth.md', 'src/auth.py'})
+        self.assertTrue(all(score > 0 for _, score in results))
+        self.assertEqual(retrieve(docs, 'zzzzzz'), [])
+        self.assertEqual(retrieve([], 'login'), [])
 
 
 class GitHubReviewTests(unittest.TestCase):
