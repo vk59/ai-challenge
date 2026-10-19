@@ -65,6 +65,7 @@
 | 29 | Оптимизация локальной LLM | [days/day-29-tuning](days/day-29-tuning) | ✅ код готов, нужно видео |
 | 30 | Локальная LLM как сервис | [days/day-30-service](days/day-30-service) | ✅ код готов, нужно видео |
 | 31 | Ассистент разработчика | [days/day-31-assistant](days/day-31-assistant) | ✅ код готов, нужно видео |
+| 32 | Автоматическое AI-ревью кода | [days/day-32-code-review](days/day-32-code-review) | ✅ код готов, нужно видео |
 
 ## Быстрый старт
 
