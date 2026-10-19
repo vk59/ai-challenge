@@ -1,0 +1,57 @@
+# День 32 — автоматическое AI-ревью PR
+
+GitHub Actions запускает ревью при открытии pull request и при каждом новом push в него. Ассистент получает diff и содержимое изменённых текстовых файлов, находит релевантные места в документации и коде **базовой версии** через RAG и публикует неблокирующий review-комментарий.
+
+## Что делает пайплайн
+
+1. Workflow срабатывает на `opened`, `reopened` и `synchronize`.
+2. Checkout берёт base SHA; synthetic PR head загружается как Git ref, но код из него не исполняется.
+3. `corpus.py` собирает отслеживаемые Markdown, Python и текстовые конфиги из base tree. Секретные пути и файлы, бинарные данные и generated/cache-каталоги исключаются.
+4. `review.py` собирает diff и изменённые файлы с head, строит временный индекс SQLite с существующим `shared/index.py` и `shared/embeddings.py`, затем вызывает `shared/llm.py` через OpenRouter.
+5. Проверенный Markdown публикуется как review с событием `COMMENT`; он не блокирует merge и не меняет код.
+
+В отзыве всегда есть три раздела: **Потенциальные баги**, **Архитектурные проблемы**, **Рекомендации**. Ассистент должен указывать строки только при наличии точной координаты и явно сообщать, если подтверждённых находок нет. Он не запускает тесты и сборки.
+
+## Настройка GitHub Actions
+
+Добавьте секрет репозитория `OPENROUTER_API_KEY` в `Settings → Secrets and variables → Actions`. Workflow использует его и для эмбеддингов, и для модели ревью. При желании задайте переменную `DAY32_REVIEW_MODEL`; по умолчанию используется `deepseek/deepseek-chat` через OpenRouter.
+
+Файл workflow задаёт минимальные права: `contents: read` и `pull-requests: write`. Для создания review GitHub Actions использует свой `GITHUB_TOKEN`; отдельный PAT не нужен.
+
+Как и любой новый workflow, этот файл начнёт автоматически обрабатывать PR после попадания в базовую ветку. PR, который впервые добавляет workflow, не может запустить его до merge; для проверки до merge используйте локальный режим.
+
+## Локальный запуск
+
+Нужны Python 3.10+, Git и `OPENROUTER_API_KEY` в окружении или в корневом `.env`:
+
+```bash
+python3 days/day-32-code-review/review.py \
+  --base <BASE_SHA> \
+  --head <HEAD_SHA> \
+  --output /tmp/day32-review.md
+```
+
+Локальный режим только сохраняет отчёт и не требует токена GitHub. Для публикации передайте `GITHUB_TOKEN` в окружении пользователю с правом писать reviews в целевой репозиторий и запустите:
+
+```bash
+python3 days/day-32-code-review/review.py \
+  --base <BASE_SHA> \
+  --head <HEAD_SHA> \
+  --output /tmp/day32-review.md \
+  --post --repository OWNER/REPOSITORY --pull-number NUMBER
+```
+
+Индекс и embedding-кэш создаются во временной директории процесса. Дифф ограничен 50 000 символами; превышение приводит к явной ошибке, а не к тихой обрезке. Если изменённый файл содержит распознаваемый секрет, его diff и содержимое не отправляются модели.
+
+## Pull request из fork
+
+GitHub не передаёт repository secrets workflow-ам из fork PR и ограничивает запись через `GITHUB_TOKEN`. Такой запуск намеренно завершается с понятной ошибкой и не публикует фиктивный отзыв. После проверки PR maintainer может получить head через `refs/pull/NUMBER/head`, запустить локальный режим на проверенных SHA и опубликовать отчёт своим `GITHUB_TOKEN`. PR head никогда не исполняется.
+
+## Проверки
+
+```bash
+python3 -m unittest discover -s days/day-32-code-review -p 'test_*.py' -v
+python3 -m py_compile days/day-32-code-review/corpus.py days/day-32-code-review/review.py
+```
+
+Unit-тесты создают временный Git-репозиторий и мокают LLM/GitHub API; реальные ключи и сеть им не нужны.

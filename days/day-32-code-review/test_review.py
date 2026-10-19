@@ -1,6 +1,8 @@
 """Offline tests for day 32; no model API or GitHub credentials are used."""
 
 import os
+import io
+import json
 import subprocess
 import sys
 import tempfile
@@ -8,6 +10,7 @@ import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parent
@@ -20,6 +23,7 @@ from review import (  # noqa: E402
     build_review,
     collect_changes,
     main,
+    post_review,
     render_report,
 )
 
@@ -64,6 +68,7 @@ class CorpusTests(GitRepository):
         self.write("certs/service.pem", "-----BEGIN PRIVATE KEY-----\nredacted\n")
         self.write("dist/generated.py", "generated = True\n")
         self.write("shared/tokens.py", "def count_tokens(text):\n    return len(text)\n")
+        self.write("config/settings.py", "api_key = 'local-secret-value'\n")
         self.write("assets/logo.png", b"\x89PNG\x00\x01")
         base = self.commit("base")
         self.write("src/app.py", "def load_config():\n    return 'head'\n")
@@ -104,6 +109,18 @@ class ChangeTests(GitRepository):
 
         with self.assertRaisesRegex(ReviewError, "слишком большой"):
             collect_changes(self.repo, base, head)
+
+    def test_omits_change_with_secret_like_assignment(self):
+        self.write("README.md", "Base documentation.\n")
+        base = self.commit("base")
+        self.write("config/settings.py", "api_key = 'local-secret-value'\n")
+        head = self.commit("add local config")
+
+        patch_text, paths, contents = collect_changes(self.repo, base, head)
+
+        self.assertEqual(paths, ["config/settings.py"])
+        self.assertEqual(patch_text, "")
+        self.assertEqual(contents, {})
 
 
 class ReportTests(unittest.TestCase):
@@ -173,6 +190,7 @@ class BuildReviewTests(GitRepository):
         index_module.STRUCTURAL = "structural"
         llm_module = types.ModuleType("llm")
         llm_module.OPENROUTER = object()
+        llm_module.load_env = Mock()
         llm_module.ask = Mock(return_value=SimpleNamespace(text="""## Потенциальные баги
 Нет подтверждённых багов.
 ## Архитектурные проблемы
@@ -187,7 +205,7 @@ class BuildReviewTests(GitRepository):
 
         with patch("review.collect_documents", return_value=docs), patch.dict(
             sys.modules, {"index": index_module, "llm": llm_module}
-        ):
+        ), patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}):
             report = build_review(self.repo, base, head)
 
         prompt = llm_module.ask.call_args.args[0]
@@ -196,6 +214,46 @@ class BuildReviewTests(GitRepository):
         self.assertIn("Base RAG context", prompt)
         self.assertIn("src/app.py", FakeIndex.observed_query)
         self.assertIn("## Рекомендации", report)
+
+
+class GitHubReviewTests(unittest.TestCase):
+    @patch("urllib.request.urlopen")
+    def test_posts_nonblocking_pr_review(self, urlopen):
+        response = Mock()
+        response.status = 200
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        urlopen.return_value = response
+
+        post_review("vk59/ai-challenge", 32, "# Review", "token-value")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(
+            request.full_url,
+            "https://api.github.com/repos/vk59/ai-challenge/pulls/32/reviews",
+        )
+        self.assertEqual(request.get_header("Authorization"), "Bearer token-value")
+        self.assertEqual(json.loads(request.data), {"body": "# Review", "event": "COMMENT"})
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 20)
+
+    @patch("urllib.request.urlopen")
+    def test_surfaces_http_error_without_echoing_token(self, urlopen):
+        token = "private-token-value"
+        urlopen.side_effect = HTTPError(
+            "https://api.github.com", 403, "Forbidden", {}, io.BytesIO(token.encode())
+        )
+
+        with self.assertRaises(ReviewError) as caught:
+            post_review("vk59/ai-challenge", 32, "# Review", token)
+
+        self.assertNotIn(token, str(caught.exception))
+        self.assertIn("403", str(caught.exception))
+
+    @patch("urllib.request.urlopen")
+    def test_missing_token_never_calls_github(self, urlopen):
+        with self.assertRaisesRegex(ReviewError, "GITHUB_TOKEN"):
+            post_review("vk59/ai-challenge", 32, "# Review", "")
+        urlopen.assert_not_called()
 
 
 if __name__ == "__main__":
