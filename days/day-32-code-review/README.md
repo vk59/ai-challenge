@@ -5,7 +5,7 @@ GitHub Actions запускает ревью при открытии pull reques
 ## Что делает пайплайн
 
 1. Workflow срабатывает на `opened`, `reopened` и `synchronize`.
-2. Checkout берёт base SHA; synthetic PR head загружается как Git ref, но код из него не исполняется.
+2. Checkout берёт base SHA либо SHA проверенного ревьюера, заданный maintainer в repository variable `DAY32_REVIEWER_SHA`; synthetic PR head загружается как Git ref и читается только как данные.
 3. `corpus.py` собирает отслеживаемые Markdown, Python и текстовые конфиги из base tree. Секретные пути и файлы, бинарные данные и generated/cache-каталоги исключаются.
 4. `review.py` собирает diff и изменённые файлы с head, строит временный индекс SQLite с существующим `shared/index.py` и `shared/embeddings.py`, затем вызывает `shared/llm.py` через OpenRouter.
 5. Проверенный Markdown публикуется как review с событием `COMMENT`; он не блокирует merge и не меняет код.
@@ -18,7 +18,7 @@ GitHub Actions запускает ревью при открытии pull reques
 
 Файл workflow задаёт минимальные права: `contents: read` и `pull-requests: write`. Для создания review GitHub Actions использует свой `GITHUB_TOKEN`; отдельный PAT не нужен.
 
-Workflow может запуститься уже на PR, который впервые добавляет его. Однако он выполняет код ревьюера из базовой версии: для автоматического AI-ревью этот код сначала должен попасть в базовую ветку. Для проверки реализации до merge используйте локальный режим.
+Workflow может запуститься уже на PR, который впервые добавляет его. По умолчанию он выполняет ревьюер из base SHA. Чтобы проверить установочный PR до merge, maintainer может после проверки кода задать repository variable `DAY32_REVIEWER_SHA` равной полному SHA проверенного коммита с ревьюером. Это фиксированная доверенная версия, а не автоматически выбранный PR head. Корпус RAG и diff по-прежнему используют настоящий base SHA. После merge переменную можно удалить, чтобы брать ревьюер из base. Альтернатива — локальный режим.
 
 ## Локальный запуск
 

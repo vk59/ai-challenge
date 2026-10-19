@@ -19,6 +19,8 @@ jobs:
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      REVIEWER_SHA: ${{ vars.DAY32_REVIEWER_SHA || github.event.pull_request.base.sha }}
+      DAY32_REVIEW_MODEL: ${{ vars.DAY32_REVIEW_MODEL || 'deepseek/deepseek-chat' }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_REPOSITORY: ${{ github.repository }}
@@ -38,11 +40,19 @@ jobs:
             exit 1
           fi
 
-      - name: Check out PR base revision
+      - name: Validate trusted reviewer revision
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          if ! [[ "$REVIEWER_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::DAY32_REVIEWER_SHA must be a full trusted commit SHA."
+            exit 1
+          fi
+
+      - name: Check out trusted reviewer revision
         if: github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ env.REVIEWER_SHA }}
           fetch-depth: 0
 
       - name: Set up Python
