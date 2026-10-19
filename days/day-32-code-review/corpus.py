@@ -29,9 +29,9 @@ _SECRET_VALUE = re.compile(
     r")"
 )
 _SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?im)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|"
-    r"client[_-]?secret|password|private[_-]?key)\b\s*[:=]\s*"
-    r"['\"]([^'\"]{8,})['\"]"
+    r"(?im)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|"
+    r"client[_-]?secret|password|private[_-]?key|credential)\b\s*[:=]\s*"
+    r"(?:['\"]([^'\"]{8,})['\"]|([A-Za-z0-9/+=_-]{8,})(?=\s|$|[,}]))"
 )
 _SENSITIVE_NAME = re.compile(r"(?i)(?:secret|credential|private[-_]?key)")
 
