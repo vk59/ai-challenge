@@ -1,0 +1,59 @@
+name: Day 34 file assistant
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - 'days/day-34-files/**'
+      - 'shared/mcp.py'
+      - 'shared/llm.py'
+      - '.github/workflows/day-34-files.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: day34-files-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Workspace, real MCP and agent tests
+        run: python3 -m unittest discover -s days/day-34-files -p 'test_*.py' -v
+      - name: Reproducible file-editing demo
+        run: python3 days/day-34-files/smoke.py
+      - name: Python syntax
+        run: python3 -m compileall -q days/day-34-files
+  cloud-smoke:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Actual model tool calls and persisted files
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DAY34_MODEL: ${{ vars.DAY34_MODEL || 'deepseek/deepseek-chat' }}
+        run: python3 -u days/day-34-files/smoke.py --live --output "$RUNNER_TEMP/day34-evidence"
+      - name: Save diffs, tool traces and generated files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: day34-file-work-evidence
+          path: ${{ runner.temp }}/day34-evidence
+          if-no-files-found: ignore
