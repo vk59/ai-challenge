@@ -20,8 +20,8 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       REVIEWER_SHA: ${{ vars.DAY32_REVIEWER_SHA || github.event.pull_request.base.sha }}
-      DAY32_REVIEW_MODEL: ${{ vars.DAY32_REVIEW_MODEL || 'deepseek/deepseek-chat' }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      DAY32_DEEPSEEK_MODEL: ${{ vars.DAY32_DEEPSEEK_MODEL || 'deepseek-chat' }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
@@ -35,8 +35,8 @@ jobs:
       - name: Check model secret
         if: github.event.pull_request.head.repo.full_name == github.repository
         run: |
-          if [ -z "$OPENROUTER_API_KEY" ]; then
-            echo "::error::Add OPENROUTER_API_KEY in repository Actions secrets."
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "::error::Add DEEPSEEK_API_KEY in repository Actions secrets."
             exit 1
           fi
 
