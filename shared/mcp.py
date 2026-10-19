@@ -103,12 +103,17 @@ class MCPClient:
         self._proc: subprocess.Popen | None = None
         self._next_id = 0
         self._stderr: list[str] = []
+        self._stderr_thread: threading.Thread | None = None
         self.info = ServerInfo()
 
     # ── жизненный цикл ──────────────────────────────────────────────────
     def __enter__(self) -> "MCPClient":
         self.start()
-        self.initialize()
+        try:
+            self.initialize()
+        except Exception:
+            self.close()
+            raise
         return self
 
     def __exit__(self, *_) -> None:
@@ -132,7 +137,8 @@ class MCPClient:
         # stderr читаем в отдельном потоке и складываем в список. Сервера
         # любят писать туда логи; если его не вычитывать, буфер однажды
         # заполнится и сервер встанет намертво посреди работы.
-        threading.Thread(target=self._drain_stderr, daemon=True).start()
+        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_thread.start()
 
     def close(self) -> None:
         if self._proc is None:
@@ -143,8 +149,15 @@ class MCPClient:
             self._proc.wait(timeout=5)
         except (subprocess.TimeoutExpired, OSError):
             self._proc.kill()
+            self._proc.wait(timeout=5)
         finally:
+            if self._stderr_thread:
+                self._stderr_thread.join(timeout=2)
+            for stream in (self._proc.stdin, self._proc.stdout, self._proc.stderr):
+                if stream and not stream.closed:
+                    stream.close()
             self._proc = None
+            self._stderr_thread = None
 
     @property
     def alive(self) -> bool:
