@@ -200,7 +200,11 @@ class FileAssistant:
                 return output
         except AgentError:
             raise
-        except (MCPError, OSError, ValueError, KeyError, TypeError, SyntaxError, llm.LLMError):
+        except llm.LLMError as exc:
+            if getattr(exc.__cause__, "code", None) == 402:
+                raise AgentError("model_payment_required", "OpenRouter: недостаточно средств (HTTP 402). Пополните баланс или запустите --demo.") from None
+            raise AgentError("model_unavailable", "Модель недоступна. Проверьте ключ, баланс и соединение.") from None
+        except (MCPError, OSError, ValueError, KeyError, TypeError, SyntaxError):
             if applying:
                 raise AgentError("apply_outcome_unknown", "Не удалось подтвердить запись. Проверьте файлы перед повторным запуском.") from None
             raise AgentError("agent_failed", "MCP или модель не завершили задачу. Проверьте проект и повторите запрос.") from None

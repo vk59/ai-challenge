@@ -5,13 +5,14 @@ import shutil
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from assistant import FileAssistant, AgentError
+from assistant import FileAssistant, AgentError, llm
 
 
 def response(calls=(), text=""):
@@ -29,6 +30,17 @@ class AgentTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch("assistant.llm.ask")
+    def test_model_billing_failure_is_actionable_and_does_not_leak_response(self, ask):
+        failure = llm.LLMError("provider response must not be exposed")
+        failure.__cause__ = urllib.error.HTTPError('https://example.test', 402, 'billing', {}, None)
+        ask.side_effect = failure
+        with self.assertRaises(AgentError) as caught:
+            FileAssistant(self.root).run('Обнови документацию')
+        self.assertEqual(caught.exception.code, 'model_payment_required')
+        self.assertNotIn('provider response', str(caught.exception))
 
     def test_usage_goal_discovers_reads_and_proposes_without_writing(self):
         result = FileAssistant(self.root, mode="demo").run(
