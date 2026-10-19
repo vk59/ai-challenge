@@ -1,0 +1,59 @@
+name: Day 35 release preparation
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - 'days/day-35-release/**'
+      - 'days/day-32-code-review/corpus.py'
+      - 'shared/llm.py'
+      - '.github/workflows/day-35-release.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: day35-release-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Git evidence, AI validation and HTTP tests
+        run: python3 -m unittest discover -s days/day-35-release -p 'test_*.py' -v
+      - name: HTTP demo on real repository history
+        run: python3 days/day-35-release/smoke.py
+  cloud-smoke:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Actual DeepSeek release preparation and export
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DAY35_MODEL: ${{ vars.DAY35_MODEL || 'deepseek-chat' }}
+        run: python3 -u days/day-35-release/smoke.py --live --output "$RUNNER_TEMP/day35-evidence"
+      - name: Save release package and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: day35-release-package
+          path: ${{ runner.temp }}/day35-evidence
+          if-no-files-found: ignore
