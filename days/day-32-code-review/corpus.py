@@ -18,6 +18,8 @@ SKIP_DIRS = {
     "build", "coverage", "vendor", ".superpowers",
 }
 MAX_CORPUS_FILE_BYTES = 256_000
+MAX_CORPUS_FILES = 200
+MAX_CORPUS_TOTAL_BYTES = 1_000_000
 
 _SECRET_VALUE = re.compile(
     r"(?i)(?:"
@@ -31,7 +33,7 @@ _SECRET_VALUE = re.compile(
 _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?im)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|"
     r"client[_-]?secret|password|private[_-]?key|credential)\b\s*[:=]\s*"
-    r"(?:['\"]([^'\"]{8,})['\"]|([A-Za-z0-9/+=_-]{8,})(?=\s|$|[,}]))"
+    r"(?:['\"][^'\"]*['\"]|[^\s,;}]+)"
 )
 _SENSITIVE_NAME = re.compile(r"(?i)(?:secret|credential|private[-_]?key)")
 
@@ -76,6 +78,7 @@ def collect_documents(repo: Path, base_ref: str) -> list:
 
     records = _git(Path(repo), "ls-tree", "-r", "-l", "-z", base_ref).split(b"\0")
     documents = []
+    total_bytes = 0
     for record in records:
         if not record:
             continue
@@ -90,6 +93,8 @@ def collect_documents(repo: Path, base_ref: str) -> list:
             continue
         if not is_indexable_path(path) or byte_size > MAX_CORPUS_FILE_BYTES:
             continue
+        if len(documents) >= MAX_CORPUS_FILES or total_bytes + byte_size > MAX_CORPUS_TOTAL_BYTES:
+            break
         try:
             raw = _git(Path(repo), "cat-file", "blob", oid)
             text = raw.decode("utf-8")
@@ -109,4 +114,5 @@ def collect_documents(repo: Path, base_ref: str) -> list:
             kind="python" if suffix == ".py" else "markdown",
             text=text,
         ))
+        total_bytes += byte_size
     return documents

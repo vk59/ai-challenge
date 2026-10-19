@@ -16,7 +16,7 @@ from unittest.mock import Mock, patch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from corpus import collect_documents  # noqa: E402
+from corpus import MAX_CORPUS_FILES, collect_documents  # noqa: E402
 from review import (  # noqa: E402
     MAX_DIFF_CHARS,
     ReviewError,
@@ -69,6 +69,7 @@ class CorpusTests(GitRepository):
         self.write("dist/generated.py", "generated = True\n")
         self.write("shared/tokens.py", "def count_tokens(text):\n    return len(text)\n")
         self.write("config/settings.py", "api_key = 'local-secret-value'\n")
+        self.write("config/short.py", 'password = "123456"\n')
         self.write("assets/logo.png", b"\x89PNG\x00\x01")
         base = self.commit("base")
         self.write("src/app.py", "def load_config():\n    return 'head'\n")
@@ -83,6 +84,15 @@ class CorpusTests(GitRepository):
         source = next(doc for doc in docs if doc.path == "src/app.py")
         self.assertIn("'base'", source.text)
         self.assertNotIn("'head'", source.text)
+
+    def test_caps_total_number_of_documents(self):
+        for number in range(MAX_CORPUS_FILES + 2):
+            self.write(f"docs/page-{number:03}.md", f"# Page {number}\nUseful project documentation.\n")
+        base = self.commit("large corpus")
+
+        docs = collect_documents(self.repo, base)
+
+        self.assertEqual(len(docs), MAX_CORPUS_FILES)
 
 
 class ChangeTests(GitRepository):
@@ -115,6 +125,18 @@ class ChangeTests(GitRepository):
         base = self.commit("base")
         self.write("config/settings.py", "api_key = 'local-secret-value'\n")
         head = self.commit("add local config")
+
+        patch_text, paths, contents = collect_changes(self.repo, base, head)
+
+        self.assertEqual(paths, ["config/settings.py"])
+        self.assertEqual(patch_text, "")
+        self.assertEqual(contents, {})
+
+    def test_omits_short_sensitive_assignment(self):
+        self.write("README.md", "Base documentation.\n")
+        base = self.commit("base")
+        self.write("config/settings.py", 'password = "123456"\n')
+        head = self.commit("add short password")
 
         patch_text, paths, contents = collect_changes(self.repo, base, head)
 
