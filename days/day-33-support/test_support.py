@@ -100,6 +100,7 @@ class AssistantTests(unittest.TestCase):
                 self.assistant.answer(question, "U-100")
 
     @patch("assistant.llm.ask")
+    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
     def test_cloud_prompt_contains_only_scoped_context_and_retrieved_docs(self, ask):
         # Keep real MCP but replace the network-dependent knowledge implementation.
         assistant = SupportAssistant(mode="cloud", knowledge=Knowledge(mode="demo"))
@@ -113,6 +114,7 @@ class AssistantTests(unittest.TestCase):
         self.assertIs(ask.call_args.kwargs["provider"], __import__("llm").OPENROUTER)
 
     @patch("assistant.llm.ask")
+    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
     def test_empty_model_answer_is_an_error(self, ask):
         assistant = SupportAssistant(mode="cloud", knowledge=Knowledge(mode="demo"))
         ask.return_value = SimpleNamespace(text=" ")
