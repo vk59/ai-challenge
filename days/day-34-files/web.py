@@ -64,7 +64,8 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == '/':
                 return self.body(200, (HERE / 'index.html').read_bytes(), 'text/html; charset=utf-8')
             if url.path == '/health':
-                return self.json(200, {'status': 'ok', 'mode': tasks.assistant.mode})
+                return self.json(200, {'status': 'ok', 'mode': tasks.assistant.mode,
+                                       'provider': tasks.assistant.provider.name})
             if url.path == '/api/project':
                 return self.json(200, tasks.project_info())
             if url.path == '/api/file':
@@ -100,13 +101,14 @@ def main():
     parser.add_argument('--port', type=int, default=8034)
     parser.add_argument('--project')
     parser.add_argument('--demo', action='store_true')
+    parser.add_argument('--provider', choices=('deepseek', 'openrouter'), default='deepseek')
     args = parser.parse_args()
     project = args.project
     if project is None:
         project = HERE.parents[1] / 'memory/day34-web' / uuid.uuid4().hex[:12]
         project.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(HERE / 'sample', project)
-    tasks = WebTasks(FileAssistant(project, mode='demo' if args.demo else 'cloud'))
+    tasks = WebTasks(FileAssistant(project, mode='demo' if args.demo else 'cloud', provider=args.provider))
     server = create_server(tasks, args.port)
     print(f'Project Files: http://127.0.0.1:{server.server_port} ({tasks.assistant.mode})', flush=True)
     try:

@@ -61,14 +61,20 @@ python3 days/day-34-files/assistant.py --demo --apply \
 
 ## Настоящий AI-режим
 
-Задайте `OPENROUTER_API_KEY` в окружении или корневом `.env`, уберите `--demo`:
+По умолчанию используется **DeepSeek напрямую**, без OpenRouter.
+`--provider openrouter` в CLI или веб-сервере явно включает старый провайдер
+с отдельным ключом `OPENROUTER_API_KEY`; его модель по умолчанию —
+`deepseek/deepseek-chat`. Для прямого DeepSeek модель — `deepseek-chat`.
+
+
+Задайте `DEEPSEEK_API_KEY` в окружении или корневом `.env`, уберите `--demo`:
 
 ```bash
 python3 days/day-34-files/assistant.py --apply \
   --goal 'Найди все использования API login и создай отчёт с файлами и строками'
 ```
 
-Модель `deepseek/deepseek-chat` сама выбирает инструменты и пути. Она получает
+Модель `deepseek-chat` сама выбирает инструменты и пути. Она получает
 только цель и схемы MCP; исходники не подставляются заранее из известных файлов.
 `DAY34_MODEL` меняет модель; `AI_ADVENT_ENV_FILE` указывает иной файл окружения,
 например `.env` основного checkout при работе в worktree. Ключ не показывается

@@ -31,7 +31,7 @@ class AgentTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask")
     def test_model_billing_failure_is_actionable_and_does_not_leak_response(self, ask):
         failure = llm.LLMError("provider response must not be exposed")
@@ -82,7 +82,7 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(events)
         self.assertNotIn('3600', (self.root / 'docs/auth.md').read_text())
 
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask")
     def test_model_itself_selects_and_calls_real_mcp_tools(self, ask):
         ask.side_effect = [
@@ -97,11 +97,21 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(result["files_read"]), 3)
         self.assertTrue((self.root / "reports/model.md").exists())
         for call in ask.call_args_list:
+            self.assertIs(call.kwargs['provider'], llm.DEEPSEEK)
+            self.assertEqual(call.kwargs['model'], 'deepseek-chat')
             names = {t["function"]["name"] for t in call.kwargs["tools"]}
             self.assertNotIn("apply_changes", names)
         self.assertTrue(any(msg["role"] == "tool" for msg in ask.call_args.kwargs["history"]))
 
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key", "DAY34_MODEL": ""})
+    @patch("assistant.llm.ask", return_value=response(text="Нет действий"))
+    def test_openrouter_is_an_explicit_optional_provider(self, ask):
+        with self.assertRaises(AgentError):
+            FileAssistant(self.root, provider='openrouter').run('Изучи проект')
+        self.assertIs(ask.call_args.kwargs['provider'], llm.OPENROUTER)
+        self.assertEqual(ask.call_args.kwargs['model'], 'deepseek/deepseek-chat')
+
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask", return_value=response(text="Всё сделано!"))
     def test_text_only_model_answer_does_not_count_as_file_work(self, ask):
         with self.assertRaises(AgentError) as caught:
@@ -109,7 +119,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "insufficient_evidence")
         self.assertNotIn("3600", (self.root / "docs/auth.md").read_text())
 
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask", return_value=response([("list_files", {})]))
     def test_repeated_tool_calls_stop_at_step_budget(self, ask):
         with self.assertRaises(AgentError) as caught:
@@ -117,7 +127,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "step_limit")
         self.assertLessEqual(ask.call_count, 12)
 
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask")
     def test_reading_without_proposing_is_not_claimed_as_completion(self, ask):
         ask.side_effect = [response([('read_file', {'path': p}) for p in (
@@ -126,7 +136,7 @@ class AgentTests(unittest.TestCase):
             FileAssistant(self.root).run("Обнови документацию", apply=True)
         self.assertEqual(caught.exception.code, "no_changes_prepared")
 
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask")
     def test_model_is_sent_back_when_report_omits_a_search_match(self, ask):
         ask.side_effect = [
@@ -143,7 +153,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(result['files_read']), 4)
         self.assertEqual(ask.call_count, 4)
 
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask")
     def test_legitimate_no_match_report_can_complete(self, ask):
         ask.side_effect = [response([
@@ -154,7 +164,7 @@ class AgentTests(unittest.TestCase):
         result = FileAssistant(self.root).run('Найди использования logout и создай отчёт', apply=True)
         self.assertEqual(result['applied_files'], ['reports/logout.md'])
 
-    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch.dict("os.environ", {"DEEPSEEK_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask")
     def test_hardlinks_cannot_fake_three_read_files(self, ask):
         os.link(self.root / 'src/auth.py', self.root / 'src/alias1.py')

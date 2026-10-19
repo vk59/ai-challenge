@@ -131,7 +131,7 @@ class WebTasks:
         with self.lock:
             saved = {path for job in self.jobs.values() if job.get('result')
                      for path in job['result']['applied_files']}
-        result.update(root=str(self.assistant.project), mode=self.assistant.mode,
+        result.update(root=str(self.assistant.project), mode=self.assistant.mode, provider=self.assistant.provider.name,
                       files=sorted(set(result['files']) | saved))
         return result
 

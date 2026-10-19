@@ -49,8 +49,8 @@ jobs:
           python-version: '3.12'
       - name: Actual model tool calls and persisted files
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          DAY34_MODEL: ${{ vars.DAY34_MODEL || 'deepseek/deepseek-chat' }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DAY34_MODEL: ${{ vars.DAY34_DEEPSEEK_MODEL || 'deepseek-chat' }}
         run: python3 -u days/day-34-files/web_smoke.py --live --output "$RUNNER_TEMP/day34-evidence"
       - name: Save diffs, tool traces and generated files
         if: always()

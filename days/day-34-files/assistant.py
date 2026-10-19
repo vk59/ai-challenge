@@ -55,18 +55,21 @@ def default_project():
 
 
 class FileAssistant:
-    def __init__(self, project, mode="cloud"):
+    def __init__(self, project, mode="cloud", provider="deepseek"):
         if mode not in {"cloud", "demo"}:
             raise ValueError("mode must be cloud or demo")
+        if provider not in {"deepseek", "openrouter"}:
+            raise ValueError("provider must be deepseek or openrouter")
         self.project, self.mode = Path(project).resolve(), mode
+        self.provider = llm.DEEPSEEK if provider == "deepseek" else llm.OPENROUTER
 
     def run(self, goal, apply=False, on_event=None, include_plan=False):
         if not isinstance(goal, str) or not 1 <= len(goal.strip()) <= 2000:
             raise AgentError("invalid_goal", "Цель должна содержать 1–2000 символов.")
         if self.mode == "cloud":
             llm.load_env()
-            if not os.environ.get("OPENROUTER_API_KEY", "").strip():
-                raise AgentError("missing_key", "Задайте OPENROUTER_API_KEY или явно выберите --demo.")
+            if not os.environ.get(self.provider.key_var, "").strip():
+                raise AgentError("missing_key", f"Задайте {self.provider.key_var} или явно выберите --demo.")
         started = time.monotonic()
         trace, files_read = [], set()
         versions = {}
@@ -140,8 +143,9 @@ class FileAssistant:
                     summary = None
                     for _ in range(12):
                         reply = llm.ask(None, system=ROLE, history=conversation, tools=schemas,
-                                        provider=llm.OPENROUTER,
-                                        model=os.environ.get("DAY34_MODEL", "").strip() or "deepseek/deepseek-chat",
+                                        provider=self.provider,
+                                        model=os.environ.get("DAY34_MODEL", "").strip() or (
+                                            "deepseek-chat" if self.provider is llm.DEEPSEEK else "deepseek/deepseek-chat"),
                                         max_tokens=2600, temperature=0.0)
                         if not reply.tool_calls:
                             if last_search is not None:
@@ -188,7 +192,7 @@ class FileAssistant:
                         raise AgentError(error["code"], error["message"],
                                          applied_files=error.get("applied_files", []), diff=diff["diff"])
                     applied = result["applied_files"]
-                output = {"goal": goal, "mode": self.mode, "summary": summary,
+                output = {"goal": goal, "mode": self.mode, "provider": self.provider.name, "summary": summary,
                         "status": "applied" if applied else "preview" if diff["diff"] else "unchanged",
                         "project": str(self.project), "files_read": sorted(files_read),
                         "tools": trace, **diff, "applied_files": applied,
@@ -202,7 +206,7 @@ class FileAssistant:
             raise
         except llm.LLMError as exc:
             if getattr(exc.__cause__, "code", None) == 402:
-                raise AgentError("model_payment_required", "OpenRouter: недостаточно средств (HTTP 402). Пополните баланс или запустите --demo.") from None
+                raise AgentError("model_payment_required", f"{self.provider.name}: недостаточно средств (HTTP 402). Пополните баланс или запустите --demo.") from None
             raise AgentError("model_unavailable", "Модель недоступна. Проверьте ключ, баланс и соединение.") from None
         except (MCPError, OSError, ValueError, KeyError, TypeError, SyntaxError):
             if applying:
@@ -259,11 +263,12 @@ def main():
     parser.add_argument("--goal", required=True)
     parser.add_argument("--project", type=Path)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--provider", choices=("deepseek", "openrouter"), default="deepseek")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--output", type=Path, help="Optional JSON report, separate from project edits")
     args = parser.parse_args()
     try:
-        result = FileAssistant(args.project or default_project(), "demo" if args.demo else "cloud").run(args.goal, apply=args.apply)
+        result = FileAssistant(args.project or default_project(), "demo" if args.demo else "cloud", args.provider).run(args.goal, apply=args.apply)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
