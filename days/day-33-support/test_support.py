@@ -2,6 +2,7 @@
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,6 +54,20 @@ class CRMTests(unittest.TestCase):
     def test_invalid_identifiers_are_rejected(self):
         result = self.call("../../crm", "T-100")
         self.assertTrue(result["isError"])
+
+
+class KnowledgeTests(unittest.TestCase):
+    @patch("knowledge.Index")
+    def test_embedding_backend_switch_uses_separate_index(self, index):
+        index.return_value.stats.return_value = {"chunks": 0}
+        with tempfile.TemporaryDirectory() as cache:
+            with patch.dict("os.environ", {"AI_ADVENT_EMBEDDINGS": "cloud"}):
+                Knowledge(mode="cloud", cache=cache)._index()
+                cloud_path = index.call_args.args[0]
+            with patch.dict("os.environ", {"AI_ADVENT_EMBEDDINGS": "local"}):
+                Knowledge(mode="cloud", cache=cache)._index()
+                local_path = index.call_args.args[0]
+        self.assertNotEqual(cloud_path, local_path)
 
 
 class AssistantTests(unittest.TestCase):

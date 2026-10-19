@@ -1,6 +1,7 @@
 """Small product-only RAG corpus: shared vector index or explicit lexical demo."""
 
 import hashlib
+import json
 import math
 import os
 import re
@@ -13,6 +14,7 @@ os.environ.setdefault("AI_ADVENT_MEMORY_DIR", str(CACHE))
 sys.path.insert(0, str(HERE.parents[1] / "shared"))
 
 from index import Document, Index, STRUCTURAL, нарезать
+from embeddings import бэкенд, модель_бэкенда, размерность_бэкенда
 
 
 def terms(text):
@@ -36,10 +38,15 @@ class Knowledge:
         if self.index is not None:
             return self.index
         self.cache.mkdir(parents=True, exist_ok=True)
+        backend = бэкенд()
+        identity = json.dumps({"backend": backend, "model": модель_бэкенда(backend),
+                               "dimensions": размерность_бэкенда(backend),
+                               "strategy": STRUCTURAL}, sort_keys=True)
+        tag = hashlib.sha256(identity.encode()).hexdigest()[:16]
         fingerprint = hashlib.sha256("\n".join(
             doc.path + "\n" + doc.text for doc in self.documents).encode()).hexdigest()
-        marker = self.cache / "corpus.sha256"
-        index = Index(self.cache / "support.sqlite")
+        marker = self.cache / f"corpus-{tag}.sha256"
+        index = Index(self.cache / f"support-{tag}.sqlite")
         if (not marker.exists() or marker.read_text() != fingerprint
                 or not index.stats(STRUCTURAL)["chunks"]):
             index.rebuild(self.documents, STRUCTURAL)
