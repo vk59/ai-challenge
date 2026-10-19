@@ -39,6 +39,8 @@ class Workspace:
                 or "\\" in name or "\0" in name or ":" in name):
             raise FileError("invalid_path", "Некорректный относительный путь.")
         parts = PurePosixPath(name).parts
+        if name != PurePosixPath(name).as_posix():
+            raise FileError("invalid_path", "Используйте канонический относительный путь без // и /./.")
         if not parts or PurePosixPath(name).is_absolute() or any(
             part in {"..", "."} or part.startswith(".") or part in SKIP - {"reports"}
             or re.search(r"(?i)secret|credential|private[-_]?key", part) for part in parts
@@ -90,8 +92,10 @@ class Workspace:
 
     def read_file(self, path):
         content = self._read(path)
+        identity = self.path(path).stat()
         self.reads.setdefault(path, (content, digest(content)))
-        return {"path": path, "content": content, "sha256": digest(content)}
+        return {"path": path, "content": content, "sha256": digest(content),
+                "file_id": f"{identity.st_dev}:{identity.st_ino}"}
 
     def search_text(self, query):
         if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200:

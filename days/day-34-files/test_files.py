@@ -63,7 +63,7 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_rejects_protected_paths_symlinks_and_source_writes(self):
         (self.root / "link.md").symlink_to(self.root / "README.md")
-        for path in ("../other.md", "/etc/passwd", ".env", ".git/config", "link.md"):
+        for path in ("../other.md", "/etc/passwd", ".env", ".git/config", "link.md", "src//auth.py", "src/./auth.py"):
             with self.subTest(path=path), self.assertRaises(FileError):
                 self.workspace.read_file(path)
         for path in ("src/auth.py", "../other.md", "docs/.env.md"):

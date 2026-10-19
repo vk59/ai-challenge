@@ -67,9 +67,10 @@ class FileAssistant:
                 raise AgentError("missing_key", "Задайте OPENROUTER_API_KEY или явно выберите --demo.")
         started = time.monotonic()
         trace, files_read = [], set()
+        file_ids = set()
         context_chars, proposals = 0, 0
         applying = False
-        last_search, proposed_contents = None, {}
+        last_search, last_query, proposed_contents = None, "", {}
         command = [sys.executable, str(HERE / "server.py"), "--project", str(self.project)]
         if apply:
             command.append("--allow-apply")
@@ -82,7 +83,7 @@ class FileAssistant:
                 allowed = {tool["function"]["name"] for tool in schemas}
 
                 def invoke(name, arguments, internal=False):
-                    nonlocal context_chars, proposals, last_search
+                    nonlocal context_chars, proposals, last_search, last_query
                     if len(trace) >= 30 and not internal:
                         raise AgentError("step_limit", "Превышен лимит 30 вызовов инструментов.")
                     try:
@@ -103,11 +104,15 @@ class FileAssistant:
                         return {"error": data}
                     if name == "read_file":
                         files_read.add(data["path"])
+                        file_ids.add(data["file_id"])
                     if name == "propose_file":
                         proposals += 1
                         proposed_contents[arguments["path"]] = arguments["content"]
                     if name == "search_text":
                         last_search = data
+                        last_query = arguments["query"]
+                        trace[-1]["search"] = {"matches": len(data["matches"]),
+                                              "truncated": data["truncated"], "skipped": data["skipped"]}
                     if not internal:
                         context_chars += len(json.dumps(data, ensure_ascii=False))
                     if context_chars > 160_000:
@@ -131,9 +136,10 @@ class FileAssistant:
                                                    if path.startswith("reports/"))
                                 missing = matched - files_read
                                 omitted = {path for path in matched if report and path not in report}
-                                if not matched or missing or omitted:
+                                retry_empty = not matched and any(char.isspace() for char in last_query.strip())
+                                if retry_empty or missing or omitted:
                                     feedback = ("Проверка полноты не пройдена. " +
-                                        ("Буквальный поиск вернул 0 совпадений: повтори поиск по одному имени символа. " if not matched else "") +
+                                        ("Буквальный поиск вернул 0 совпадений: повтори поиск по одному имени символа. " if retry_empty else "") +
                                         (f"Прочитай найденные файлы: {sorted(missing)}. " if missing else "") +
                                         (f"Добавь в отчёт пропущенные пути: {sorted(omitted)}. " if omitted else ""))
                                     conversation.append({"role": "user", "content": feedback})
@@ -149,7 +155,7 @@ class FileAssistant:
                                                  "content": json.dumps(result, ensure_ascii=False)})
                     if summary is None:
                         raise AgentError("step_limit", "Модель не завершила задачу за 12 раундов.")
-                if len(files_read) < 3:
+                if len(file_ids) < 3:
                     raise AgentError("insufficient_evidence", "Ассистент не прочитал минимум три разных файла.")
                 if not summary:
                     raise AgentError("empty_answer", "Модель не описала результат работы.")

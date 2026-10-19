@@ -1,5 +1,6 @@
 """Goal-level scenarios using real MCP; cloud loop is mocked here."""
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -118,6 +119,29 @@ class AgentTests(unittest.TestCase):
         self.assertIn('src/cli.py', (self.root / 'reports/uses.md').read_text())
         self.assertEqual(len(result['files_read']), 4)
         self.assertEqual(ask.call_count, 4)
+
+    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch("assistant.llm.ask")
+    def test_legitimate_no_match_report_can_complete(self, ask):
+        ask.side_effect = [response([
+            ('search_text', {'query': 'logout'}),
+            *(('read_file', {'path': p}) for p in ('src/auth.py', 'src/web.py', 'src/cli.py')),
+            ('propose_file', {'path': 'reports/logout.md', 'content': '# logout\nСовпадений нет.\n'})]),
+            response(text='Использований logout не найдено, отчёт подготовлен')]
+        result = FileAssistant(self.root).run('Найди использования logout и создай отчёт', apply=True)
+        self.assertEqual(result['applied_files'], ['reports/logout.md'])
+
+    @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
+    @patch("assistant.llm.ask")
+    def test_hardlinks_cannot_fake_three_read_files(self, ask):
+        os.link(self.root / 'src/auth.py', self.root / 'src/alias1.py')
+        os.link(self.root / 'src/auth.py', self.root / 'src/alias2.py')
+        ask.side_effect = [response([
+            *(('read_file', {'path': p}) for p in ('src/auth.py', 'src/alias1.py', 'src/alias2.py')),
+            ('propose_file', {'path': 'reports/test.md', 'content': '# Read one file'})]), response(text='Готово')]
+        with self.assertRaises(AgentError) as caught:
+            FileAssistant(self.root).run('Изучи API и создай отчёт', apply=True)
+        self.assertEqual(caught.exception.code, 'insufficient_evidence')
 
 
 if __name__ == "__main__":
