@@ -58,7 +58,7 @@ class FileAssistant:
             raise ValueError("mode must be cloud or demo")
         self.project, self.mode = Path(project).resolve(), mode
 
-    def run(self, goal, apply=False):
+    def run(self, goal, apply=False, on_event=None, include_plan=False):
         if not isinstance(goal, str) or not 1 <= len(goal.strip()) <= 2000:
             raise AgentError("invalid_goal", "Цель должна содержать 1–2000 символов.")
         if self.mode == "cloud":
@@ -67,6 +67,14 @@ class FileAssistant:
                 raise AgentError("missing_key", "Задайте OPENROUTER_API_KEY или явно выберите --demo.")
         started = time.monotonic()
         trace, files_read = [], set()
+        versions = {}
+
+        def emit(event):
+            if on_event is not None:
+                try:
+                    on_event(dict(event))
+                except Exception:
+                    pass  # Progress reporting must not affect file operations.
         file_ids = set()
         context_chars, proposals = 0, 0
         applying = False
@@ -101,9 +109,12 @@ class FileAssistant:
                                  for key, value in arguments.items()}
                     trace.append({"name": name, "arguments": safe_args, "ok": ok})
                     if not ok:
+                        trace[-1]["error"] = data.get("code")
+                        emit(trace[-1])
                         return {"error": data}
                     if name == "read_file":
                         files_read.add(data["path"])
+                        versions.setdefault(data["path"], data["sha256"])
                         file_ids.add(data["file_id"])
                     if name == "propose_file":
                         proposals += 1
@@ -113,6 +124,7 @@ class FileAssistant:
                         last_query = arguments["query"]
                         trace[-1]["search"] = {"matches": len(data["matches"]),
                                               "truncated": data["truncated"], "skipped": data["skipped"]}
+                    emit(trace[-1])
                     if not internal:
                         context_chars += len(json.dumps(data, ensure_ascii=False))
                     if context_chars > 160_000:
@@ -174,11 +186,16 @@ class FileAssistant:
                         raise AgentError(error["code"], error["message"],
                                          applied_files=error.get("applied_files", []), diff=diff["diff"])
                     applied = result["applied_files"]
-                return {"goal": goal, "mode": self.mode, "summary": summary,
+                output = {"goal": goal, "mode": self.mode, "summary": summary,
                         "status": "applied" if applied else "preview" if diff["diff"] else "unchanged",
                         "project": str(self.project), "files_read": sorted(files_read),
                         "tools": trace, **diff, "applied_files": applied,
                         "seconds": round(time.monotonic() - started, 2)}
+                if include_plan:
+                    output["_plan"] = [{"path": path, "content": proposed_contents[path],
+                                        "expected_sha256": versions.get(path)}
+                                       for path in diff["staged_files"]]
+                return output
         except AgentError:
             raise
         except (MCPError, OSError, ValueError, KeyError, TypeError, SyntaxError, llm.LLMError):

@@ -59,6 +59,17 @@ class AgentTests(unittest.TestCase):
         again = assistant.run(goal, apply=True)
         self.assertEqual(again["diff"], "")
 
+    def test_preview_can_export_exact_plan_and_progress_for_web(self):
+        events = []
+        result = FileAssistant(self.root, mode='demo').run(
+            'Обнови документацию по входу', on_event=events.append, include_plan=True)
+        plan = result['_plan']
+        self.assertEqual([entry['path'] for entry in plan], ['docs/auth.md'])
+        self.assertIn('3600', plan[0]['content'])
+        self.assertEqual(len(plan[0]['expected_sha256']), 64)
+        self.assertTrue(events)
+        self.assertNotIn('3600', (self.root / 'docs/auth.md').read_text())
+
     @patch.dict("os.environ", {"OPENROUTER_API_KEY": "unit-test-key"})
     @patch("assistant.llm.ask")
     def test_model_itself_selects_and_calls_real_mcp_tools(self, ask):
